@@ -1,0 +1,3 @@
+[install]
+# The test suite imports omp-internal modules optionally; never let Bun try to download them.
+auto = "disable"

@@ -1,0 +1,53 @@
+#!/bin/sh
+# Finds a Python 3.10 or newer and runs omp-dashboard with it: the first of python3.14 ... python3.10 and python3 that is
+# recent enough, on PATH and in the usual places (a service starts with a very small PATH).
+#
+# OMP_DASHBOARD_PYTHON=/absolute/path/to/python3 forces an interpreter. Nothing here installs or changes anything.
+set -u
+
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink "$self") || exit 2
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname "$self")/$target ;;
+  esac
+done
+here=$(cd "$(dirname "$self")" && pwd -P) || exit 2
+main="$here/../python/omp_dashboard_main.py"
+[ -f "$main" ] || { echo "omp-dashboard: cannot find $main" >&2; exit 2; }
+
+recent() {
+  "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+}
+
+if [ -n "${OMP_DASHBOARD_PYTHON:-}" ]; then
+  case $OMP_DASHBOARD_PYTHON in
+    /*) ;;
+    *) echo "omp-dashboard: OMP_DASHBOARD_PYTHON must be an absolute path" >&2; exit 2 ;;
+  esac
+  recent "$OMP_DASHBOARD_PYTHON" || { echo "omp-dashboard: $OMP_DASHBOARD_PYTHON is not Python 3.10 or newer" >&2; exit 2; }
+  exec "$OMP_DASHBOARD_PYTHON" "$main" "$@"
+fi
+
+for dir in "" /opt/homebrew/bin /usr/local/bin "${HOME:-/nonexistent}/.local/bin"; do
+  for name in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+    if [ -z "$dir" ]; then
+      py=$(command -v "$name" 2>/dev/null) || continue
+    else
+      py=$dir/$name
+      [ -x "$py" ] || continue
+    fi
+    case $py in /*) ;; *) continue ;; esac
+    if recent "$py"; then
+      exec "$py" "$main" "$@"
+    fi
+  done
+done
+
+cat >&2 <<'EOF'
+omp-dashboard needs Python 3.10 or newer, and none was found.
+Install one (Homebrew: brew install python; Ubuntu: apt install python3; or uv, python.org) and run this again,
+or set OMP_DASHBOARD_PYTHON to its absolute path. On macOS, /usr/bin/python3 is 3.9 and too old.
+EOF
+exit 2

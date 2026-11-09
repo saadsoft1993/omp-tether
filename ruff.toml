@@ -1,0 +1,21 @@
+line-length = 120
+target-version = "py310"
+extend-exclude = ["**/node_modules"]
+
+[lint]
+select = ["F", "E", "W", "I", "UP", "B", "RUF"]
+ignore = [
+    "E402",   # the test kit is imported after sys.path is set up
+    "RUF001", # the tests use non-ASCII names on purpose
+]
+
+[lint.per-file-ignores]
+# Files that assemble forbidden words from fragments, on purpose, so that they pass their own check.
+"tools/public-tree-check/public_tree_check.py" = ["E501"]
+# Long user-facing messages and test fixtures that the formatter does not wrap.
+"plugins/omp-services/**" = ["E501"]
+"plugins/omp-dashboard/**" = ["E501"]
+# The launchers must parse on Python versions older than the supported floor, so that they can say so.
+"plugins/omp-services/python/omp_services_main.py" = ["E501", "UP031", "UP036"]
+"plugins/omp-dashboard/python/omp_dashboard_main.py" = ["E501", "UP031", "UP036"]
+"tools/extension-load-gate/test_gate.py" = ["E501"]

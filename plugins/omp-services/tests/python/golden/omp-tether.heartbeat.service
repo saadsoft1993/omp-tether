@@ -1,0 +1,18 @@
+# Managed by omp-services. Changes are overwritten by `omp-services init`.
+[Unit]
+Description=omp-services heartbeat: runs the health checks and pings the configured URL
+
+[Service]
+Type=simple
+ExecStart="/usr/bin/python3.12" "/home/example/.local/share/omp-services/current/python/omp_services_main.py" "heartbeat" "run"
+Environment="PATH=/home/example/.local/share/omp-services/bin:/home/example/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+WorkingDirectory=/home/example/.local/state/omp-services
+UMask=0077
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+StandardOutput=append:/home/example/.local/state/omp-services/logs/heartbeat.log
+StandardError=append:/home/example/.local/state/omp-services/logs/heartbeat.log
+
+[Install]
+WantedBy=default.target

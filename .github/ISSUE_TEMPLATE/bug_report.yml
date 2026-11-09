@@ -1,0 +1,64 @@
+name: Bug report
+description: Something does not work as the plugin's README says it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do not paste secrets: no pairing links, tokens, ntfy topics, heartbeat URLs or key
+        files. If you think the problem is a security hole, do not file it here; use the repository's Security tab instead.
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: Plugin
+      options:
+        - omp-session-control
+        - omp-services
+        - omp-private-relay
+        - omp-dashboard
+        - Repository tooling (Makefile, tests, gate)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+      description: From `omp plugin list`, or the plugin's package.json.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: omp
+    attributes:
+      label: omp version
+      description: Output of `omp --version`.
+      placeholder: "omp/18.18.3"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and architecture
+      placeholder: "macOS 15 arm64, Ubuntu 24.04 x86_64"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of commands or clicks that shows the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Command output or log lines (for example `omp-services doctor`). Remove anything private first.
+      render: text

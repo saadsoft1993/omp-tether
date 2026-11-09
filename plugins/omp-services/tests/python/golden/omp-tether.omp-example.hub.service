@@ -1,0 +1,20 @@
+# Managed by omp-services. Changes are overwritten by `omp-services init`.
+[Unit]
+Description=Example hub 100%% sure $HOME "quoted"
+
+[Service]
+Type=simple
+ExecStart="/home/example/.local/bin/omp" "/opt/example dir/hub.ts" "--port" "8123" "a b"
+Environment="BUN_BE_BUN=1"
+Environment="EXAMPLE_MODE=x=1 %%h $y"
+Environment="PATH=/home/example/.local/share/omp-services/bin:/home/example/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+WorkingDirectory=/home/example/.local/state/omp-services
+UMask=0077
+Restart=always
+RestartSec=20
+NoNewPrivileges=yes
+StandardOutput=append:/home/example/.local/state/omp-services/logs/omp-example.hub.log
+StandardError=append:/home/example/.local/state/omp-services/logs/omp-example.hub.log
+
+[Install]
+WantedBy=default.target

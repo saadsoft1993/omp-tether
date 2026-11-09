@@ -1,0 +1,46 @@
+--- a/packages/collab-web/index.html
++++ b/packages/collab-web/index.html
+@@ -73,8 +73,6 @@
+ 			}
+ 		</script>
+ 
+-		<!-- Analytics. data-exclude-hash keeps the E2E room key (URL fragment) out of analytics. -->
+-		<script defer src="https://um.can.ac/script.js" data-website-id="28ab5a7d-3ca4-4c85-9da5-666fa731cb92" data-exclude-hash="true"></script>
+ 	</head>
+ 	<body>
+ 		<div id="root"></div>
+--- a/packages/collab-web/src/lib/link.ts
++++ b/packages/collab-web/src/lib/link.ts
+@@ -164,5 +164,21 @@
+ 	}
+ 	const key = secret.subarray(0, ROOM_KEY_BYTES);
+ 	const writeToken = secret.byteLength > ROOM_KEY_BYTES ? secret.subarray(ROOM_KEY_BYTES) : undefined;
+-	return { wsUrl: `${normalized.origin}/r/${roomId}`, roomId, key, writeToken };
++	return { wsUrl: `${guestRelayOrigin(normalized.origin)}/r/${roomId}`, roomId, key, writeToken };
+ }
++
++/**
++ * Private relay: hosts reach it on a loopback `ws://` listener, so their links
++ * name that private address. A page served by the relay's own guest listener
++ * connects back to its own origin instead: `wss://` when the page is https
++ * (behind `tailscale serve`), `ws://` when it is plain http on a loopback
++ * address (the relay's `token` adapter).
++ */
++function guestRelayOrigin(origin: string): string {
++	if (typeof location === "undefined") return origin;
++	const url = new URL(origin);
++	if (url.protocol !== "ws:" || !LOCAL_HOSTNAMES[url.hostname]) return origin;
++	if (location.protocol === "https:") return `wss://${location.host}`;
++	if (location.protocol === "http:" && LOCAL_HOSTNAMES[location.hostname]) return `ws://${location.host}`;
++	return origin;
++}
+--- a/packages/collab-web/src/lib/socket.ts
++++ b/packages/collab-web/src/lib/socket.ts
+@@ -15,6 +15,7 @@
+ 	4004: "no such room",
+ 	4009: "a host is already connected for this room",
+ 	4029: "room is full",
++	4401: "this browser is not paired with the relay; pair it again, then reload",
+ };
+ 
+ const BACKOFF_BASE_MS = 1_000;

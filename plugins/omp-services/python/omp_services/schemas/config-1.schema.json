@@ -1,0 +1,128 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://github.com/saadsoft1993/omp-tether/plugins/omp-services/python/omp_services/schemas/config-1.schema.json",
+	"title": "omp-services configuration, schemaVersion 1",
+	"description": "$XDG_CONFIG_HOME/omp-services/config.json. Holds no secrets: the heartbeat URL lives in its own 0600 file.",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["schemaVersion"],
+	"properties": {
+		"schemaVersion": { "const": 1, "description": "Always 1 for this schema." },
+		"labelPrefix": {
+			"type": "string",
+			"pattern": "^[a-z0-9](?:[a-z0-9.-]{0,38}[a-z0-9])?$",
+			"default": "omp-tether",
+			"description": "Prefix of every launchd label and systemd unit this tool manages. Only units that carry it are ever touched."
+		},
+		"omp": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"path": {
+					"type": ["string", "null"],
+					"pattern": "^/[^\\x00-\\x1f]*$",
+					"default": null,
+					"description": "Absolute path of the omp binary the services run. null: found at init (OMP_BIN, PATH, ~/.local/bin/omp) and pinned."
+				}
+			}
+		},
+		"python": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"path": {
+					"type": ["string", "null"],
+					"pattern": "^/[^\\x00-\\x1f]*$",
+					"default": null,
+					"description": "Absolute path of the Python (3.10 or newer) the services run. null: the interpreter that runs init."
+				}
+			}
+		},
+		"heartbeat": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "Install the heartbeat service. Off until `omp-services heartbeat set-url` has stored a URL."
+				},
+				"allowNoChecks": {
+					"type": "boolean",
+					"default": false,
+					"description": "A round with no health checks at all sends <URL>/fail instead of <URL>, so a silent misconfiguration is loud. Set true when the heartbeat is only meant to say the machine is alive."
+				},
+				"intervalSeconds": { "type": "integer", "minimum": 30, "maximum": 86400, "default": 300 },
+				"urlFile": {
+					"type": ["string", "null"],
+					"pattern": "^/[^\\x00-\\x1f]*$",
+					"default": null,
+					"description": "Absolute path of the 0600 file holding the https ping URL. null: <config dir>/secrets/heartbeat-url."
+				},
+				"pingTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 120, "default": 15 },
+				"checkTimeoutSeconds": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 60,
+					"default": 10,
+					"description": "Deadline of a check that does not set its own."
+				},
+				"cycleTimeoutSeconds": {
+					"type": "integer",
+					"minimum": 5,
+					"maximum": 600,
+					"default": 120,
+					"description": "All checks of one round together; checks not reached by then count as failed."
+				}
+			}
+		},
+		"health": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"allowRemoteUrls": {
+					"type": "boolean",
+					"default": false,
+					"description": "Let url and port checks from health.d drop-ins reach hosts other than loopback."
+				}
+			}
+		},
+		"tools": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"tailscale": {
+					"type": ["string", "null"],
+					"pattern": "^/[^\\x00-\\x1f]*$",
+					"default": null,
+					"description": "Absolute path of the tailscale CLI for serve-route checks. null: found on PATH, then the macOS app bundle."
+				}
+			}
+		},
+		"catalog": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"marketplace": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,62}[A-Za-z0-9])?$",
+					"default": "omp-tether",
+					"description": "Name of the omp marketplace the plugins were installed from; used for the newer-version notice and upgrade."
+				}
+			}
+		},
+		"logs": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"maxBytes": {
+					"type": "integer",
+					"minimum": 65536,
+					"maximum": 1073741824,
+					"default": 1048576,
+					"description": "A service log larger than this is copied to <name>.1 and truncated by the heartbeat."
+				}
+			}
+		}
+	}
+}

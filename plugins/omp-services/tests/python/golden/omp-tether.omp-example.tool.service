@@ -1,0 +1,18 @@
+# Managed by omp-services. Changes are overwritten by `omp-services init`.
+[Unit]
+Description=omp-example tool
+
+[Service]
+Type=simple
+ExecStart="/usr/bin/example" "serve"
+Environment="PATH=/home/example/.local/share/omp-services/bin:/home/example/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+WorkingDirectory=/home/example/.local/state/omp-services
+UMask=0077
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+StandardOutput=append:/home/example/.local/state/omp-services/logs/omp-example.tool.log
+StandardError=append:/home/example/.local/state/omp-services/logs/omp-example.tool.log
+
+[Install]
+WantedBy=default.target

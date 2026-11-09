@@ -1,0 +1,46 @@
+{
+	"name": "omp-tether",
+	"owner": { "name": "saadsoft1993" },
+	"metadata": {
+		"description": "Plugins that let you reach your own omp sessions from other places on your own machines.",
+		"version": "0.1.0"
+	},
+	"plugins": [
+		{
+			"name": "omp-session-control",
+			"source": "./plugins/omp-session-control",
+			"version": "0.1.0",
+			"description": "Stop the running turn of an omp session and rename it from a local dashboard, over a private Unix socket. Inert until you turn it on.",
+			"license": "MIT",
+			"category": "productivity",
+			"keywords": ["session", "control", "dashboard", "unix-socket"]
+		},
+		{
+			"name": "omp-services",
+			"source": "./plugins/omp-services",
+			"version": "0.1.0",
+			"description": "Sets up and checks the background services other omp plugins need: launchd and systemd user units, a heartbeat that runs health checks other plugins contribute, doctor. Nothing is installed until you confirm a plan.",
+			"license": "MIT",
+			"category": "productivity",
+			"keywords": ["services", "launchd", "systemd", "heartbeat", "doctor"]
+		},
+		{
+			"name": "omp-private-relay",
+			"source": "./plugins/omp-private-relay",
+			"version": "0.1.0",
+			"description": "A Collab relay that runs on your own machine, with a patched browser client and per-browser pairing, so session links never go through omp's public relay. Does nothing until you run its init.",
+			"license": "MIT",
+			"category": "productivity",
+			"keywords": ["collab", "relay", "pairing", "loopback"]
+		},
+		{
+			"name": "omp-dashboard",
+			"source": "./plugins/omp-dashboard",
+			"version": "0.1.0",
+			"description": "A local dashboard for your own omp sessions: list, open (through your private relay), stop, rename, kill and start them, with per-browser pairing. Does nothing until you run it.",
+			"license": "MIT",
+			"category": "productivity",
+			"keywords": ["dashboard", "pairing", "sessions", "loopback"]
+		}
+	]
+}

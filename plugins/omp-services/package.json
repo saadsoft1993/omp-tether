@@ -1,0 +1,13 @@
+{
+	"name": "omp-services",
+	"version": "0.1.0",
+	"description": "Bootstrapper and operations base for omp plugins that need background services: init, doctor, launchd and systemd units, a heartbeat with plugin-contributed health checks. Inert until you run setup.",
+	"type": "module",
+	"license": "MIT",
+	"keywords": ["omp-package", "omp-extension"],
+	"omp": {
+		"extensions": ["./src/omp-services.ts"]
+	},
+	"files": ["src", "bin", "python", "docs", "README.md", "SECURITY.md", "CHANGELOG.md", "LICENSE", "install.sh", "install.sh.sha256"],
+	"peerDependencies": {}
+}

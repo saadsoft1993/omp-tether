@@ -1,0 +1,13 @@
+{
+	"name": "omp-dashboard",
+	"version": "0.1.0",
+	"description": "A local dashboard for your own omp sessions: list them, open them through your private relay, stop, rename, kill and start them, with per-browser pairing. Does nothing until you run it.",
+	"type": "module",
+	"license": "MIT",
+	"keywords": ["omp-package", "dashboard", "pairing", "loopback"],
+	"bin": {
+		"omp-dashboard": "./bin/omp-dashboard"
+	},
+	"files": ["bin", "python", "ui-dist", "ui-build.json", "docs", "README.md", "SECURITY.md", "CHANGELOG.md", "LICENSE", "NOTICE"],
+	"peerDependencies": {}
+}

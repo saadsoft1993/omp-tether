@@ -1,0 +1,27 @@
+{
+	"schema": 1,
+	"bun": "1.4.4",
+	"files": {
+		"favicon.svg": {
+			"sha256": "09d089be5ef24b8b25e038e6376c5a84252982b6cd1a0f2af607c5cd45b96d94",
+			"size": 209
+		},
+		"index.css": {
+			"sha256": "77c1e156e3dc89b6fb5c72ddc8b732c0f90ca268d1b69ecaf4c536a4402fcb13",
+			"size": 18912
+		},
+		"index.html": {
+			"sha256": "0987724a3e435b1071a14fd7429997bdd29a7dc8a88ef76b80fa26e000669277",
+			"size": 460
+		},
+		"index.js": {
+			"sha256": "4f93e4b95e43a5805983d576ca7a0740057e70a4c3ab9d83506e8c408ebb4f1d",
+			"size": 222843
+		},
+		"theme.js": {
+			"sha256": "95c725b6774545ab48ed37c84fb8078bf83481d5de65fa55b10c2020290bc0c2",
+			"size": 379
+		}
+	},
+	"treeSha256": "862d0d7f98b1c14e4d68b48bc0ccab7d2a9d9f8f95b640ed1c6861f9809295f1"
+}

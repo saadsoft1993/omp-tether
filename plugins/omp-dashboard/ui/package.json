@@ -1,0 +1,26 @@
+{
+	"name": "omp-dashboard-ui",
+	"private": true,
+	"version": "0.1.0",
+	"description": "Sources of the omp-dashboard page. Built with `bun run build` into ../ui-dist (committed, with ../ui-build.json).",
+	"type": "module",
+	"license": "MIT",
+	"scripts": {
+		"build": "bun build.ts",
+		"verify": "bun build.ts --verify",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"test": "bun test tests"
+	},
+	"dependencies": {
+		"lucide-react": "1.24.0",
+		"react": "19.2.7",
+		"react-dom": "19.2.7"
+	},
+	"devDependencies": {
+		"@types/bun": "1.4.4",
+		"@types/react": "19.2.0",
+		"@types/react-dom": "19.2.0",
+		"linkedom": "0.18.12",
+		"typescript": "5.9.3"
+	}
+}

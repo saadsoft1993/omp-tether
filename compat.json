@@ -1,0 +1,106 @@
+{
+	"schema": 1,
+	"omp": {
+		"minimum": "18.18.0",
+		"tested": ["18.18.0"],
+		"note": "Only listed versions have been run. Newer versions are expected to work but are untested until listed."
+	},
+	"bun": {
+		"minimum": "1.4.4",
+		"note": "For running the tests only. omp 18.18.0 embeds Bun 1.4.4, which is what the extension runs on."
+	},
+	"protocols": {
+		"session-control": [1],
+		"health": [1],
+		"services": [1],
+		"config": [1],
+		"pairing-store": [1],
+		"relay-check": [1],
+		"dashboard-config": [1],
+		"ui-build": [1]
+	},
+	"plugins": {
+		"omp-session-control": {
+			"version": "0.1.0",
+			"extensionId": "extension-module:omp-session-control",
+			"protocols": ["session-control/1"],
+			"platforms": ["darwin", "linux"],
+			"ompApi": [
+				"ExtensionAPI.on: session_start, session_switch, session_branch, session_shutdown",
+				"ExtensionAPI.registerCommand",
+				"ExtensionAPI.getSessionName, setSessionName",
+				"ExtensionContext.mode, agent.kind, sessionManager.getSessionId, isIdle, abort, ui.notify",
+				"ExtensionContext.setTimeout, clearTimer"
+			],
+			"ompInternals": [
+				{
+					"module": "@oh-my-pi/pi-coding-agent/config/registry",
+					"use": "lookup('disabledExtensions').get and .listen with ExtensionAPI.pi.settings, to close control when the extension is disabled live",
+					"ifMissing": "control still works, but a live disabledExtensions edit no longer closes the socket until the session ends or the off file is used; the extension reports this once when control starts and in /session-control status"
+				},
+				{
+					"module": "@oh-my-pi/pi-coding-agent/extensibility/plugins/loader",
+					"use": "getPluginSettings, to read the stored controlDir and idleTimeoutMs",
+					"ifMissing": "defaults and environment variables only"
+				}
+			]
+		},
+		"omp-services": {
+			"version": "0.1.0",
+			"extensionId": "extension-module:omp-services",
+			"protocols": ["health/1", "services/1", "config/1"],
+			"platforms": ["darwin", "linux"],
+			"python": ">=3.10",
+			"ompApi": ["ExtensionAPI.registerCommand", "ExtensionContext.hasUI, ui.notify, ui.confirm"],
+			"ompInternals": [],
+			"ompCli": [
+				"omp --version",
+				"omp plugin list --json",
+				"omp plugin marketplace update <name>"
+			],
+			"note": "The command line also reads omp's cached marketplace catalog (<plugins root>/cache/marketplaces/<name>/marketplace.json), found from the installPath that `omp plugin list --json` reports."
+		},
+		"omp-private-relay": {
+			"version": "0.1.0",
+			"protocols": ["pairing-store/1", "relay-check/1"],
+			"platforms": ["darwin", "linux"],
+			"ompTested": ["18.18.3"],
+			"runtime": "The Bun embedded in omp (BUN_BE_BUN=1 <omp> <script>), 1.4.4 or newer: the relay refuses to start on an older one.",
+			"ompInterfaces": [
+				"omp --version prints omp/<major.minor.patch> when BUN_BE_BUN is not set (init, doctor and rebuild-web read the minor from it)",
+				"BUN_BE_BUN=1 <omp> <file.ts> runs the file on omp's embedded Bun",
+				"omp config get|set collab.relayUrl and collab.webUrl (init shows the exact lines and runs them only on consent)",
+				"The Collab room contract of omp's stand-in relay: GET /r/<roomId>?role=host|guest, envelope peer ids, close codes 4001, 4004, 4009, 4029",
+				"Collab links: <web url>/#<relay url>/r/<roomId>.<key>; a loopback ws:// relay in a link is rewritten by the patched web client",
+				"collab-web at the release tag (packages/collab-web: index.html, src/lib/link.ts, src/lib/socket.ts), changed by patches/collab-web-<minor>.patch"
+			],
+			"produces": ["services/1 drop-in", "health/1 drop-in"],
+			"webBuilds": {
+				"18.18": {
+					"ompTag": "v18.18.3",
+					"bun": "1.4.4",
+					"asset": "omp-private-relay-web-18.18.tar",
+					"sha256": "8702cb37df80852b6b9869f2ad56b90f9fe5a48a26cf5c8dad975a3e66030af9",
+					"treeSha256": "cba0590238c42ebc09f1685fbddb5655a9a287fe5fb2edc725b9ce79a7c94404",
+					"noticeSha256": "f350105cc3fd276082c5060f3f7fbb65bcc2eff41450f2ac74bce2666a44e906"
+				}
+			},
+			"note": "The patch applies unchanged to v18.18.0 and v18.18.3; the pinned build is from v18.18.3. A new omp minor needs its own patch file and build."
+		},
+		"omp-dashboard": {
+			"version": "0.1.0",
+			"protocols": ["pairing-store/1", "session-control/1", "relay-check/1", "services/1", "health/1", "config/1"],
+			"platforms": ["darwin", "linux"],
+			"python": ">=3.10",
+			"ompTested": ["18.18.3"],
+			"ompInterfaces": [
+				"omp --version prints omp/<major.minor.patch>",
+				"omp collab list --json and omp collab link <instanceId> [--view] --json, JSON version 1",
+				"omp config get collab.displayName, collab.relayUrl and collab.webUrl",
+				"Collab links: <web url>/#<relay url>/r/<roomId>.<key>"
+			],
+			"produces": ["services/1 drop-in", "health/1 drop-in"],
+			"note": "The dashboard page is committed in ui-dist and pinned by ui-build.json (SHA-256 per file); it needs no network."
+		}
+	}
+}

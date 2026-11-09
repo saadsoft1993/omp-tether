@@ -1,0 +1,2 @@
+# Allowed author and committer identities, exactly as `git log --format='%an <%ae>'` prints them.
+Example Author <author@example.com>

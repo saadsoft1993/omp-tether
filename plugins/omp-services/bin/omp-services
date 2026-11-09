@@ -1,0 +1,54 @@
+#!/bin/sh
+# Finds a Python 3.10 or newer and runs omp-services with it. This is the entry point before `init` has pinned an
+# interpreter (the one-line installer and /omp-services setup use it); afterwards the wrapper that init writes to
+# <data>/bin/omp-services calls the pinned interpreter directly.
+#
+# OMP_SERVICES_PYTHON=/absolute/path/to/python3 forces an interpreter. Nothing here installs or changes anything.
+set -u
+
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink "$self") || exit 2
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname "$self")/$target ;;
+  esac
+done
+here=$(cd "$(dirname "$self")" && pwd -P) || exit 2
+main="$here/../python/omp_services_main.py"
+[ -f "$main" ] || { echo "omp-services: cannot find $main" >&2; exit 2; }
+
+recent() {
+  "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+}
+
+if [ -n "${OMP_SERVICES_PYTHON:-}" ]; then
+  case $OMP_SERVICES_PYTHON in
+    /*) ;;
+    *) echo "omp-services: OMP_SERVICES_PYTHON must be an absolute path" >&2; exit 2 ;;
+  esac
+  recent "$OMP_SERVICES_PYTHON" || { echo "omp-services: $OMP_SERVICES_PYTHON is not Python 3.10 or newer" >&2; exit 2; }
+  exec "$OMP_SERVICES_PYTHON" "$main" "$@"
+fi
+
+for dir in "" /opt/homebrew/bin /usr/local/bin "${HOME:-/nonexistent}/.local/bin"; do
+  for name in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+    if [ -z "$dir" ]; then
+      py=$(command -v "$name" 2>/dev/null) || continue
+    else
+      py=$dir/$name
+      [ -x "$py" ] || continue
+    fi
+    case $py in /*) ;; *) continue ;; esac
+    if recent "$py"; then
+      exec "$py" "$main" "$@"
+    fi
+  done
+done
+
+cat >&2 <<'EOF'
+omp-services needs Python 3.10 or newer, and none was found.
+Install one (Homebrew: brew install python; Ubuntu: apt install python3; or uv, python.org) and run this again,
+or set OMP_SERVICES_PYTHON to its absolute path. On macOS, /usr/bin/python3 is 3.9 and too old.
+EOF
+exit 2

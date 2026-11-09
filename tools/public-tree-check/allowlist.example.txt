@@ -1,0 +1,17 @@
+# Allowed paths for a published tree. Anything not matched here fails the check.
+# Deny globs inside the tool (agent-instruction files, caches, env files, research notes) beat this list.
+README.md
+LICENSE
+NOTICE
+SECURITY.md
+.gitignore
+.omp-plugin/marketplace.json
+compat.json
+plugins/*/package.json
+plugins/*/README.md
+plugins/*/src/**
+plugins/*/tests/**
+plugins/*/schemas/**
+docs/protocol/**
+docs/threat-model.md
+tools/public-tree-check/**

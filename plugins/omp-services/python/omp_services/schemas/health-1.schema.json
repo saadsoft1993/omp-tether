@@ -1,0 +1,172 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://github.com/saadsoft1993/omp-tether/plugins/omp-services/python/omp_services/schemas/health-1.schema.json",
+	"title": "health/1 drop-in",
+	"description": "$XDG_CONFIG_HOME/omp-services/health.d/<plugin>.json. Specification: docs/protocol/health-1.md.",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["protocol", "plugin", "checks"],
+	"properties": {
+		"protocol": { "const": "health/1" },
+		"plugin": { "$ref": "#/$defs/plugin" },
+		"checks": {
+			"type": "array",
+			"minItems": 1,
+			"maxItems": 64,
+			"items": {
+				"oneOf": [
+					{ "$ref": "#/$defs/url" },
+					{ "$ref": "#/$defs/port" },
+					{ "$ref": "#/$defs/uidOwner" },
+					{ "$ref": "#/$defs/serveRoute" },
+					{ "$ref": "#/$defs/command" },
+					{ "$ref": "#/$defs/fileAge" },
+					{ "$ref": "#/$defs/watchdog" }
+				]
+			}
+		}
+	},
+	"$defs": {
+		"plugin": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$" },
+		"id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+		"severity": { "enum": ["fail", "note"], "description": "fail (default): counts toward the heartbeat result. note: reported only." },
+		"seconds": { "type": "integer", "minimum": 1, "maximum": 60 },
+		"tcpPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+		"age": { "type": "integer", "minimum": 1, "maximum": 31536000 },
+		"url": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id", "type", "url"],
+			"properties": {
+				"id": { "$ref": "#/$defs/id" },
+				"type": { "const": "url" },
+				"severity": { "$ref": "#/$defs/severity" },
+				"timeoutSeconds": { "$ref": "#/$defs/seconds" },
+				"url": { "type": "string", "pattern": "^https?://[^\\s@]+$", "maxLength": 2048 },
+				"expectStatus": {
+					"type": "array",
+					"minItems": 1,
+					"maxItems": 20,
+					"items": { "type": "integer", "minimum": 100, "maximum": 599 },
+					"description": "Accepted status codes. Default: any 2xx. Redirects are never followed."
+				},
+				"freshness": {
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["jsonPointer", "maxAgeSeconds"],
+					"properties": {
+						"jsonPointer": { "type": "string", "pattern": "^(/([^/~]|~[01])*)+$", "maxLength": 256 },
+						"maxAgeSeconds": { "$ref": "#/$defs/age" },
+						"format": { "enum": ["epoch-seconds", "iso8601"], "default": "epoch-seconds" }
+					}
+				}
+			}
+		},
+		"port": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id", "type", "port"],
+			"properties": {
+				"id": { "$ref": "#/$defs/id" },
+				"type": { "const": "port" },
+				"severity": { "$ref": "#/$defs/severity" },
+				"timeoutSeconds": { "$ref": "#/$defs/seconds" },
+				"host": { "type": "string", "pattern": "^[A-Za-z0-9.:-]+$", "maxLength": 253, "default": "127.0.0.1" },
+				"port": { "$ref": "#/$defs/tcpPort" }
+			}
+		},
+		"uidOwner": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id", "type", "port"],
+			"properties": {
+				"id": { "$ref": "#/$defs/id" },
+				"type": { "const": "uid-owner" },
+				"severity": { "$ref": "#/$defs/severity" },
+				"timeoutSeconds": { "$ref": "#/$defs/seconds" },
+				"port": { "$ref": "#/$defs/tcpPort" },
+				"uid": {
+					"oneOf": [{ "const": "self" }, { "type": "integer", "minimum": 0, "maximum": 4294967294 }],
+					"default": "self"
+				}
+			}
+		},
+		"serveRoute": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id", "type", "target"],
+			"properties": {
+				"id": { "$ref": "#/$defs/id" },
+				"type": { "const": "serve-route" },
+				"severity": { "$ref": "#/$defs/severity" },
+				"timeoutSeconds": { "$ref": "#/$defs/seconds" },
+				"port": { "$ref": "#/$defs/tcpPort", "default": 443 },
+				"path": { "type": "string", "pattern": "^/[^\\s]*$", "maxLength": 256, "default": "/" },
+				"target": { "type": "string", "pattern": "^https?://[^\\s@]+$", "maxLength": 2048 }
+			}
+		},
+		"command": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id", "type", "argv"],
+			"properties": {
+				"id": { "$ref": "#/$defs/id" },
+				"type": { "const": "command" },
+				"severity": { "$ref": "#/$defs/severity" },
+				"timeoutSeconds": { "$ref": "#/$defs/seconds" },
+				"argv": {
+					"type": "array",
+					"minItems": 1,
+					"maxItems": 32,
+					"items": { "type": "string", "maxLength": 1024 },
+					"description": "No shell. argv[0] must be an absolute path (checked by the runner)."
+				},
+				"expectExit": { "type": "integer", "minimum": 0, "maximum": 255, "default": 0 },
+				"expectOutputContains": { "type": "string", "minLength": 1, "maxLength": 200 }
+			}
+		},
+		"fileAge": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id", "type", "path", "maxAgeSeconds"],
+			"properties": {
+				"id": { "$ref": "#/$defs/id" },
+				"type": { "const": "file-age" },
+				"severity": { "$ref": "#/$defs/severity" },
+				"path": {
+					"type": "string",
+					"pattern": "^/[^\\x00-\\x1f]*$",
+					"maxLength": 1024,
+					"description": "Absolute path or glob (* ? [..]); the newest match counts."
+				},
+				"maxAgeSeconds": { "$ref": "#/$defs/age" }
+			}
+		},
+		"watchdog": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id", "type", "service"],
+			"properties": {
+				"id": { "$ref": "#/$defs/id" },
+				"type": { "const": "watchdog" },
+				"severity": { "$ref": "#/$defs/severity" },
+				"timeoutSeconds": { "$ref": "#/$defs/seconds" },
+				"service": {
+					"type": "string",
+					"pattern": "^[a-z0-9][a-z0-9-]{0,40}$",
+					"description": "A service this plugin declares in its own services.d drop-in."
+				},
+				"restart": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"maxRestarts": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3 },
+						"windowSeconds": { "type": "integer", "minimum": 60, "maximum": 86400, "default": 3600 },
+						"cooldownSeconds": { "type": "integer", "minimum": 10, "maximum": 3600, "default": 60 },
+						"graceSeconds": { "$ref": "#/$defs/seconds", "default": 10 }
+					}
+				}
+			}
+		}
+	}
+}

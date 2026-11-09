@@ -1,0 +1,3 @@
+[install]
+# The relay has no dependencies; never let Bun try to download anything while the code or the tests run.
+auto = "disable"

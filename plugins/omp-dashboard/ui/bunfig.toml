@@ -1,0 +1,3 @@
+[install]
+# Nothing is downloaded while the tests run or the page is built; `make ui-install` is the one place that fetches packages.
+auto = "disable"

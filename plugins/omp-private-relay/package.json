@@ -1,0 +1,26 @@
+{
+	"name": "omp-private-relay",
+	"version": "0.1.0",
+	"description": "A private Collab relay for omp that runs on your own machine, with a patched browser client and per-browser pairing. Does nothing until you run its init.",
+	"type": "module",
+	"license": "MIT",
+	"keywords": ["omp-package", "collab", "relay"],
+	"bin": {
+		"omp-private-relay": "./bin/omp-private-relay"
+	},
+	"files": [
+		"bin",
+		"src",
+		"schemas",
+		"patches",
+		"scripts",
+		"docs",
+		"web-builds.json",
+		"README.md",
+		"SECURITY.md",
+		"CHANGELOG.md",
+		"LICENSE",
+		"NOTICE"
+	],
+	"peerDependencies": {}
+}

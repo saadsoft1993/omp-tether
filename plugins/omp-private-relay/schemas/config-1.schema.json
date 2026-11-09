@@ -1,0 +1,102 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://github.com/saadsoft1993/omp-tether/plugins/omp-private-relay/schemas/config-1.schema.json",
+	"title": "omp-private-relay config",
+	"description": "$XDG_CONFIG_HOME/omp-private-relay/config.json (default ~/.config/omp-private-relay/config.json). Every key is optional except schemaVersion; environment variables named OMP_PRIVATE_RELAY_* override single keys (see the README). Secrets never go in this file.",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["schemaVersion"],
+	"properties": {
+		"schemaVersion": { "const": 1 },
+		"omp": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"bin": { "oneOf": [{ "$ref": "#/$defs/absPath" }, { "type": "null" }], "default": null, "description": "Absolute path of the omp binary that runs the relay and the web build. null: the omp found on PATH." }
+			}
+		},
+		"listen": {
+			"type": "object",
+			"additionalProperties": false,
+			"description": "Both listeners are bound to 127.0.0.1 and cannot be moved: the relay never listens on another interface.",
+			"properties": {
+				"hostPort": { "$ref": "#/$defs/port", "default": 17797, "description": "Where omp sessions connect (collab.relayUrl = ws://127.0.0.1:<hostPort>)." },
+				"guestPort": { "$ref": "#/$defs/port", "default": 17796, "description": "Where browsers connect: the web client and the guest sockets." }
+			}
+		},
+		"auth": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"adapter": {
+					"enum": ["token", "tailscale-serve"],
+					"default": "token",
+					"description": "How a browser proves it may use the guest listener. token: loopback only, paired by a one-time link. tailscale-serve: reached through `tailscale serve`, which also has to name you as the owner."
+				},
+				"token": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"allowedHosts": {
+							"type": "array",
+							"maxItems": 8,
+							"items": { "type": "string", "pattern": "^(?:[a-z0-9][a-z0-9.-]*|\\[::1\\]):[0-9]{1,5}$" },
+							"default": [],
+							"description": "Extra lowercase host:port values accepted in the Host header, for an SSH port forward that uses a different local port. 127.0.0.1:<guestPort> and localhost:<guestPort> are always accepted."
+						}
+					}
+				},
+				"tailscale": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"bin": { "type": "string", "pattern": "^[A-Za-z0-9._/+-]{1,1024}$", "default": "tailscale", "description": "The tailscale command, by name or absolute path." },
+						"servePort": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535, "default": null, "description": "The https port `tailscale serve` listens on. Default: the guest port." },
+						"owner": { "type": "string", "maxLength": 320, "default": "", "description": "Tailscale login of the owner. Empty: read from `tailscale status` and refreshed every minute." },
+						"publicHost": { "type": "string", "maxLength": 253, "pattern": "^[A-Za-z0-9.-]*$", "default": "", "description": "MagicDNS name of this machine. Empty: read from `tailscale status`." }
+					}
+				}
+			}
+		},
+		"pairing": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"mode": {
+					"enum": ["own", "shared"],
+					"default": "own",
+					"description": "own: the relay keeps the pairing store and can redeem pairing links itself. shared: another program (a dashboard) writes the store and the relay only reads it."
+				},
+				"dir": { "$ref": "#/$defs/absPath", "description": "Pairing store directory (pairing-store/1). Default: <config dir>/pairing." },
+				"cookieName": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "default": "omp_relay", "description": "Name of the browser cookie that holds the session id. In shared mode it must match the program that sets it." }
+			}
+		},
+		"web": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"dir": { "$ref": "#/$defs/absPath", "description": "Directory the web client is served from. Default: <data dir>/web/current." }
+			}
+		},
+		"checkDir": { "$ref": "#/$defs/absPath", "description": "Directory for the listener check key (relay-check/1). Default: <config dir>/check." },
+		"limits": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"maxRooms": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 32 },
+				"maxGuestsPerRoom": { "type": "integer", "minimum": 1, "maximum": 256, "default": 8 },
+				"maxConnections": { "type": "integer", "minimum": 4, "maximum": 100000, "default": 256, "description": "WebSockets open or being upgraded, on both listeners. The next upgrade is refused with HTTP 503 before a socket exists. Plain HTTP connections are not counted." },
+				"maxHostFrame": { "type": "integer", "minimum": 1024, "maximum": 268435456, "default": 16777216, "description": "Bytes. Largest frame an omp host may send." },
+				"maxGuestFrame": { "type": "integer", "minimum": 1024, "maximum": 268435456, "default": 4194304, "description": "Bytes. Largest frame a browser may send." },
+				"connQueueMax": { "type": "integer", "minimum": 65536, "maximum": 1073741824, "default": 33554432, "description": "Bytes queued for one connection before it is cut with 4008." },
+				"relayQueueMax": { "type": "integer", "minimum": 65536, "maximum": 4294967296, "default": 134217728, "description": "Bytes queued across all connections before slow ones are cut." },
+				"recheckMs": { "type": "integer", "minimum": 100, "maximum": 30000, "default": 10000, "description": "How often open browsers are checked against the pairing store. At most 30 s." },
+				"restartGraceMs": { "type": "integer", "minimum": 0, "maximum": 120000, "default": 60000, "description": "After a start, a browser asking for a room whose host has not reconnected yet is told to retry (4001) instead of that the room does not exist (4004)." }
+			}
+		}
+	},
+	"$defs": {
+		"port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+		"absPath": { "type": "string", "pattern": "^/[^\\u0000-\\u001f]*$", "maxLength": 1024 }
+	}
+}

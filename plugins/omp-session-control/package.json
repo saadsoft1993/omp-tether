@@ -1,0 +1,34 @@
+{
+	"name": "omp-session-control",
+	"version": "0.1.0",
+	"description": "Lets a local dashboard stop the running turn of an omp session and rename it, over a private Unix socket. Inert until you turn it on.",
+	"type": "module",
+	"license": "MIT",
+	"keywords": ["omp-package", "omp-extension"],
+	"omp": {
+		"extensions": ["./src/omp-session-control.ts"],
+		"settings": {
+			"controlDir": {
+				"type": "string",
+				"description": "Absolute path of the control directory. Empty means ~/.config/omp-session-control.",
+				"env": "OMP_SESSION_CONTROL_DIR"
+			},
+			"debugLog": {
+				"type": "boolean",
+				"description": "Also write the text of unexpected errors (at most 200 characters each) to events.log. Off by default: that text can contain sensitive values.",
+				"default": false,
+				"env": "OMP_SESSION_CONTROL_DEBUG"
+			},
+			"idleTimeoutMs": {
+				"type": "number",
+				"description": "Close a client connection that sends nothing for this many milliseconds (100 to 3600000).",
+				"default": 60000,
+				"min": 100,
+				"max": 3600000,
+				"env": "OMP_SESSION_CONTROL_IDLE_MS"
+			}
+		}
+	},
+	"files": ["src", "docs", "README.md", "SECURITY.md", "CHANGELOG.md", "LICENSE"],
+	"peerDependencies": {}
+}

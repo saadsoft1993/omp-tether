@@ -1,0 +1,40 @@
+#!/bin/sh
+# Runs the omp-private-relay command line on the Bun that omp embeds, so no separate Bun or Node is needed.
+#
+#   omp-private-relay init | status | doctor | pair | ...        (omp-private-relay help)
+#
+# The omp binary is taken from OMP_BIN, then from PATH, then from the places omp installs itself. BUN_BE_BUN is set
+# for the one command that runs the script and nowhere else: with it set, omp behaves as a plain Bun, so it must never
+# leak into a child that is meant to run omp itself (the script clears it for those).
+set -eu
+
+# Follow symlinks (omp links installed plugins), so the script path below is the real one.
+self=$0
+while [ -h "$self" ]; do
+	dir=$(cd "$(dirname "$self")" && pwd)
+	target=$(readlink "$self")
+	case $target in
+	/*) self=$target ;;
+	*) self=$dir/$target ;;
+	esac
+done
+root=$(cd "$(dirname "$self")/.." && pwd)
+
+omp=${OMP_BIN:-}
+if [ -z "$omp" ]; then
+	omp=$(command -v omp 2>/dev/null || true)
+fi
+if [ -z "$omp" ]; then
+	for candidate in "$HOME/.local/bin/omp" /usr/local/bin/omp /opt/homebrew/bin/omp; do
+		if [ -x "$candidate" ]; then
+			omp=$candidate
+			break
+		fi
+	done
+fi
+if [ -z "$omp" ] || [ ! -x "$omp" ]; then
+	echo "omp-private-relay: omp was not found. Install omp, or set OMP_BIN to its path." >&2
+	exit 1
+fi
+
+BUN_BE_BUN=1 exec "$omp" "$root/src/cli.ts" "$@"

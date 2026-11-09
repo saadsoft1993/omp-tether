@@ -1,0 +1,17 @@
+{
+	"schema": 1,
+	"repository": "saadsoft1993/omp-tether",
+	"releaseTag": "omp-private-relay-v0.1.0",
+	"builds": {
+		"18.18": {
+			"ompTag": "v18.18.3",
+			"bun": "1.4.4",
+			"asset": "omp-private-relay-web-18.18.tar",
+			"sha256": "8702cb37df80852b6b9869f2ad56b90f9fe5a48a26cf5c8dad975a3e66030af9",
+			"treeSha256": "cba0590238c42ebc09f1685fbddb5655a9a287fe5fb2edc725b9ce79a7c94404",
+			"noticeSha256": "f350105cc3fd276082c5060f3f7fbb65bcc2eff41450f2ac74bce2666a44e906",
+			"bytes": 929280,
+			"files": 23
+		}
+	}
+}

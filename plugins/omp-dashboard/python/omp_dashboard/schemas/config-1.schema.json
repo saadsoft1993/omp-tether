@@ -1,0 +1,162 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://github.com/saadsoft1993/omp-tether/plugins/omp-dashboard/python/omp_dashboard/schemas/config-1.schema.json",
+	"title": "omp-dashboard configuration, schemaVersion 1",
+	"description": "$XDG_CONFIG_HOME/omp-dashboard/config.json (or the file OMP_DASHBOARD_CONFIG names). Every key is optional except schemaVersion. Holds no secrets: the ntfy topic lives in its own 0600 file. Environment variables OMP_DASHBOARD_* override the file (see the README).",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["schemaVersion"],
+	"properties": {
+		"schemaVersion": { "const": 1, "description": "Always 1 for this schema." },
+		"listen": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"host": {
+					"type": "string",
+					"enum": ["127.0.0.1", "::1"],
+					"default": "127.0.0.1",
+					"description": "The address the hub binds. Loopback only: the hub speaks plain HTTP and refuses to start on any other address. To reach it from another device, put tailscale serve or an SSH forward in front of it."
+				},
+				"port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 17795, "description": "The port the hub listens on." }
+			}
+		},
+		"auth": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"adapter": {
+					"type": "string",
+					"enum": ["loopback-only", "tailscale-serve"],
+					"default": "loopback-only",
+					"description": "Who may even ask. loopback-only: the pairing cookie alone, on a loopback Host. tailscale-serve: requests must come through Tailscale Serve and name this machine's owner, besides the cookie."
+				},
+				"loopbackOnly": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"allowedHosts": {
+							"type": "array",
+							"maxItems": 8,
+							"items": { "type": "string", "pattern": "^[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$|^\\[[0-9a-f:]{2,39}\\]:[0-9]{1,5}$" },
+							"default": [],
+							"description": "Extra host:port values the browser may use, for an SSH forward on another local port."
+						}
+					}
+				},
+				"tailscale": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"bin": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "Absolute path of the tailscale command. null: found on PATH, then the macOS app bundle." },
+						"servePort": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535, "default": null, "description": "The https port of `tailscale serve` that forwards to the hub. null: the same number as listen.port." },
+						"owner": { "type": ["string", "null"], "pattern": "^[^\\x00-\\x1f]{1,200}$", "default": null, "description": "Owner login. null: read from Tailscale. With publicHost, Tailscale is not asked at all." },
+						"publicHost": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9.-]{1,253}$", "default": null, "description": "This machine's MagicDNS name. null: read from Tailscale." }
+					}
+				}
+			}
+		},
+		"pairing": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"dir": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "The pairing store (pairing-store/1). null: <config dir>/pairing. To let omp-private-relay accept the same browsers, point its pairing.dir here and set its pairing.mode to shared." },
+				"cookieName": { "type": "string", "pattern": "^[A-Za-z0-9_]{1,40}$", "default": "omp_dashboard", "description": "The cookie that holds the browser's session id. omp-private-relay in shared mode must use the same name." },
+				"maxAgeDays": { "type": ["integer", "null"], "minimum": 1, "maximum": 3650, "default": 90, "description": "A paired browser is no longer paired this many days after it was paired (the cookie expires then too). null: never. omp-private-relay in shared mode does not apply this limit." }
+			}
+		},
+		"omp": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"bin": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "Absolute path of omp. null: OMP_BIN, then PATH." }
+			}
+		},
+		"control": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"dir": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "omp-session-control's control directory (session-control/1). null: OMP_SESSION_CONTROL_DIR, then ~/.config/omp-session-control. Stop and Rename need it." }
+			}
+		},
+		"relay": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"enabled": { "type": "boolean", "default": false, "description": "Offer Open and Watch through omp-private-relay. Off: sessions are listed, and no link is ever handed out." },
+				"hostPort": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 17797, "description": "The relay's host listener (where omp sessions connect). omp's collab.relayUrl must be ws://127.0.0.1:<this>." },
+				"guestPort": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 17796, "description": "The relay's guest listener (where browsers connect)." },
+				"checkDir": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "The relay's check directory (relay-check/1). null: <config home>/omp-private-relay/check." },
+				"webUrl": { "type": ["string", "null"], "pattern": "^https?://[^\\x00-\\x20/?#]+$", "default": null, "description": "The address a browser uses for the relay's web client, and omp's collab.webUrl. null: http://127.0.0.1:<guestPort> with loopback-only, https://<name>:<servePort> with tailscale-serve." },
+				"servePort": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535, "default": null, "description": "With tailscale-serve: the https port of `tailscale serve` for the relay's guest listener. null: guestPort." }
+			}
+		},
+		"start": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"backend": { "type": "string", "enum": ["off", "herdr", "tmux"], "default": "off", "description": "How Start opens a new session: in a herdr tab, in a tmux window, or not at all." },
+				"roots": {
+					"type": "array",
+					"maxItems": 32,
+					"items": { "type": "string", "pattern": "^(/|~/)[^\\x00-\\x1f]*$", "maxLength": 1024 },
+					"default": [],
+					"description": "Folders Start may open sessions in: each one, and every git repository below it. Empty: nothing can be started."
+				},
+				"maxDepth": { "type": "integer", "minimum": 1, "maximum": 6, "default": 3, "description": "How deep below a root to look for git repositories." },
+				"herdr": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": { "bin": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "Absolute path of herdr. null: HERDR_BIN, then PATH." } }
+				},
+				"tmux": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"bin": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "Absolute path of tmux. null: PATH." },
+						"session": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,40}$", "default": "omp", "description": "The tmux session Start adds windows to (created when it does not exist)." }
+					}
+				}
+			}
+		},
+		"projects": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"rankBySessions": { "type": "boolean", "default": false, "description": "Order the Start list by recent use. Reads only the names and modification times of the folders in omp's session directory, never what is in them." },
+				"sessionsDir": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "omp's session directory. null: $PI_CODING_AGENT_DIR/sessions, else ~/.omp/agent/sessions." }
+			}
+		},
+		"alerts": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"server": { "type": "string", "pattern": "^https://[^\\x00-\\x20/?#]+$|^http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]{1,5})?$", "default": "https://ntfy.sh", "description": "The ntfy server. https only (http only to loopback, for tests). Alerts name the project folder and the model to this server." },
+				"topicFile": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "The file that holds the ntfy topic (a bearer secret, 0600). null: <config dir>/secrets/ntfy-topic. Alerts are off while the file does not exist." },
+				"minTurnSeconds": { "type": "integer", "minimum": 5, "maximum": 3600, "default": 60, "description": "A finished turn alerts only when it ran at least this long." }
+			}
+		},
+		"stats": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"url": { "type": ["string", "null"], "pattern": "^https?://[^\\x00-\\x20/?#]+(/[^\\x00-\\x20]*)?$", "default": null, "description": "Where a stock `omp stats` is reachable from your browser. The Usage page links there; the hub never talks to it. null: no link." }
+			}
+		},
+		"audit": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"file": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "The audit log. null: <state dir>/audit.jsonl." },
+				"maxBytes": { "type": "integer", "minimum": 4096, "maximum": 1073741824, "default": 1048576, "description": "The log moves to <file>.1 when it passes this size (one previous file is kept)." }
+			}
+		},
+		"machine": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"name": { "type": ["string", "null"], "pattern": "^[^\\x00-\\x1f]{1,60}$", "default": null, "description": "The name shown in the banner. null: omp's collab.displayName, else this machine's host name." }
+			}
+		}
+	}
+}

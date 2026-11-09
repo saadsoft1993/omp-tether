@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Managed by omp-services. Changes are overwritten by `omp-services init`. -->
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>BUN_BE_BUN</key>
+		<string>1</string>
+		<key>EXAMPLE_MODE</key>
+		<string>x=1 %h $y</string>
+		<key>PATH</key>
+		<string>/home/example/.local/share/omp-services/bin:/home/example/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>omp-tether.omp-example.hub</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/home/example/.local/bin/omp</string>
+		<string>/opt/example dir/hub.ts</string>
+		<string>--port</string>
+		<string>8123</string>
+		<string>a b</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/home/example/.local/state/omp-services/logs/omp-example.hub.log</string>
+	<key>StandardOutPath</key>
+	<string>/home/example/.local/state/omp-services/logs/omp-example.hub.log</string>
+	<key>ThrottleInterval</key>
+	<integer>20</integer>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>WorkingDirectory</key>
+	<string>/home/example/.local/state/omp-services</string>
+</dict>
+</plist>
