@@ -37,6 +37,5 @@ log, the Start backends against stand-in commands and a real tmux, the page's ha
 health runner); the pairing-store/1 conformance suite and a cross-check with the relay's own reader and writer; an integration test of the hub
 against two live omp sessions with the real session-control extension; and a mutation check that switches off a list of guards one at a time
 in a copy and requires a test to fail (`make test-dashboard-mutation`; the list is in `tests/mutation/run_mutations.py` and is not every guard).
-These show that the guards that exist work, not that no guard is missing. herdr was not available when this was written, so its backend is tested
-against a stand-in command only; Tailscale Serve was exercised only through a stand-in `tailscale` command, so its header behaviour on a real
-tailnet is unverified. Treat early releases as beta software, and do not expose the hub beyond a tunnel you control.
+These show that the guards that exist work, not that no guard is missing. herdr 0.9.5 (a real server in a scratch home) and Tailscale 1.104.5 Serve on macOS (a real route, called with forged headers) were also exercised once, by hand, on a second machine; what they did not cover is
+a real Serve with a second tailnet identity (a different account or a shared device), and herdr on Linux. Treat early releases as beta software, and do not expose the hub beyond a tunnel you control.

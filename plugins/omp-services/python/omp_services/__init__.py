@@ -3,7 +3,7 @@
 Standard library only; Python 3.10 or newer. The command line is `omp-services` (see `omp_services.cli`).
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 PLUGIN_NAME = "omp-services"
 MIN_PYTHON = (3, 10)
 MIN_OMP = (18, 18, 0)

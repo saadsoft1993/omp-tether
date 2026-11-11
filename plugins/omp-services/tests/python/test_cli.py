@@ -31,7 +31,7 @@ class ProcessTests(support.Case):
 
     def test_version_and_help(self):
         done = self.run_launcher("--version")
-        self.assertEqual((done.returncode, done.stdout.strip()), (0, "omp-services 0.1.0"))
+        self.assertEqual((done.returncode, done.stdout.strip()), (0, "omp-services 0.1.1"))
         done = self.run_launcher("--help")
         self.assertEqual(done.returncode, 0)
         for word in ("init", "doctor", "uninstall", "purge", "heartbeat"):

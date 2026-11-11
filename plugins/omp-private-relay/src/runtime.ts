@@ -1,4 +1,5 @@
 // The Bun the code runs on, and how to run something under omp's embedded Bun.
+import * as fs from "node:fs";
 import * as path from "node:path";
 
 export const MIN_BUN = "1.4.4";
@@ -57,4 +58,33 @@ export function findOmp(configured: string | null, env: Record<string, string | 
 		if (candidate && path.isAbsolute(candidate)) return candidate;
 	}
 	return Bun.which("omp", { PATH: env.PATH ?? "" });
+}
+
+/** Where a Tailscale install puts the command when PATH does not (a service or an ssh session has a small PATH). */
+export const TAILSCALE_PLACES: readonly string[] = [
+	"/usr/local/bin/tailscale",
+	"/opt/homebrew/bin/tailscale",
+	"/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+];
+
+const isExecutableFile = (file: string): boolean => {
+	try {
+		if (!fs.statSync(file).isFile()) return false;
+		fs.accessSync(file, fs.constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+};
+
+/**
+ * The tailscale command. `configured` is `auth.tailscale.bin` (default `tailscale`): an absolute path is used as it is, or
+ * is not found (the user named it, so nothing else is tried in its place); the bare name is looked up on PATH, then in the
+ * usual places. Returned as an absolute path; null when there is none.
+ */
+export function findTailscale(configured: string, env: Record<string, string | undefined> = process.env, places: readonly string[] = TAILSCALE_PLACES): string | null {
+	if (path.isAbsolute(configured)) return isExecutableFile(configured) ? configured : null;
+	const onPath = Bun.which(configured, { PATH: env.PATH ?? "" });
+	if (onPath) return onPath;
+	return places.find(isExecutableFile) ?? null;
 }

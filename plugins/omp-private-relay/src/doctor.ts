@@ -1,12 +1,13 @@
 // `doctor`, `check` and `status`: what is installed, what is running, and whether what answers on the relay's ports is
 // really the relay of this user. Nothing here changes anything.
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { parseTailscaleStatus } from "./auth/tailscale-serve";
 import { type Config, ConfigError, configFilePath, loadConfig, relayUrl } from "./config";
 import { proveListener, readCheckKey } from "./listener-check";
 import { PairingReader } from "./pairing-store";
 import { ownership } from "./platform";
-import { checkBun, envForOmp, findOmp, MIN_BUN, minorOf, probeOmp } from "./runtime";
+import { checkBun, envForOmp, findOmp, findTailscale, MIN_BUN, minorOf, probeOmp, TAILSCALE_PLACES } from "./runtime";
 import { parseServeStatus } from "./serve-status";
 import { inspectInstalled, loadWebBuilds } from "./web-asset";
 import { UID } from "./fsutil";
@@ -132,7 +133,7 @@ export async function runDoctor(env: Env = process.env): Promise<Finding[]> {
 
 	out.push(...(await listenerFindings(config)));
 
-	if (config.auth.adapter === "tailscale-serve") out.push(...tailscaleFindings(config));
+	if (config.auth.adapter === "tailscale-serve") out.push(...tailscaleFindings(config, env));
 
 	if (omp) {
 		const wantRelay = relayUrl(config);
@@ -145,9 +146,15 @@ export async function runDoctor(env: Env = process.env): Promise<Finding[]> {
 	return out;
 }
 
-function tailscaleFindings(config: Config): Finding[] {
+function tailscaleFindings(config: Config, env: Env): Finding[] {
 	const out: Finding[] = [];
-	const bin = config.auth.tailscale.bin;
+	const configured = config.auth.tailscale.bin;
+	const bin = findTailscale(configured, env);
+	if (!bin) {
+		const looked = path.isAbsolute(configured) ? configured : `PATH and ${TAILSCALE_PLACES.join(", ")}`;
+		out.push(finding("tailscale", "fail", `the tailscale command was not found (looked at ${looked})`, "install Tailscale, or set auth.tailscale.bin in the config file (or OMP_PRIVATE_RELAY_TAILSCALE_BIN) to its absolute path, for example /Applications/Tailscale.app/Contents/MacOS/Tailscale"));
+		return out;
+	}
 	const status = runText([bin, "status", "--json"]);
 	const self = status?.code === 0 ? parseTailscaleStatus(status.out) : null;
 	if (!status) {

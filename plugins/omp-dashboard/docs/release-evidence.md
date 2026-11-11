@@ -17,8 +17,8 @@ numbers from earlier trees: counts and results belong to one revision, and are r
 
 ## Not verified, and why
 
-- **Tailscale Serve on a real tailnet.** Only a stand-in `tailscale` command was used; whether Serve replaces a caller-supplied `Tailscale-User-Login` is untested.
-- **herdr.** It was not installed; the backend is tested against a stand-in command only. tmux 3.4 was exercised for real.
+- **Tailscale Serve with a second tailnet identity.** A real Serve (Tailscale 1.104.5, macOS) was tested on a second machine: a forged `Tailscale-User-Login` was replaced by the real owner's login, a forged `Tailscale-Funnel-Request` was removed and a forged `X-Forwarded-For` was replaced. The test tailnet had one user, so a request from a real non-owner identity was not tried; that refusal is proven only with forged headers on loopback. Serve on Linux was not tested.
+- **herdr on Linux.** herdr 0.9.5 was tested for real on macOS (Start opened a workspace, a tab labelled `omp` and a pane running `omp`); on Linux the backend is tested against a stand-in command only. tmux 3.4 was exercised for real.
 - **Open and Watch in a browser** need a running `omp-private-relay` with its web client; the page's refusal states are what the real-omp test exercises.
 - **Force kill after a Kill that failed, with a real omp:** a stopped omp is not listed and a running one ends on SIGTERM, so the sequence cannot be provoked; it is tested with real processes.
 - **`make release-check`'s relay half** belongs to omp-private-relay and needs an omp checkout at its tag and the built web archive.

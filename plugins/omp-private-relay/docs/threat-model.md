@@ -67,8 +67,8 @@ do not run this.**
 - **macOS and Linux.** Listener ownership comes from `lsof` (macOS) and from `/proc/net/tcp` and `/proc/net/tcp6` (Linux,
   with `ss -e` as a fallback). A listener whose owner the tool cannot show (an `lsof` run by an ordinary user prints nothing
   for another account's socket) is reported as unknown, never as yours: `doctor` says so, and the `uid-owner` check of the health drop-in (run by omp-services) fails on it. `omp-private-relay check` rests on the listener proof instead and fails only when the owner is seen to be another account.
-- **Tailscale on Linux** has not been tested for what Serve puts in its headers. Until it has, treat the `tailscale-serve`
-  adapter as macOS-tested.
+- **Tailscale on Linux** has not been tested for what Serve puts in its headers. On macOS a real Serve (Tailscale 1.104.5) was tested: it replaced a caller-sent
+  `Tailscale-User-Login`, removed a caller-sent Funnel header and replaced `X-Forwarded-For`; a non-owner tailnet identity was not available to test. Until Linux has been tested, treat the `tailscale-serve` adapter as macOS-tested.
 - **Windows** is unsupported (omp's own transport there differs, and this plugin's file-permission checks assume Unix).
 
 ## What is stored, and where
@@ -119,7 +119,7 @@ single-user machine, or a layer below what the plugin can see.
 ## Open items
 
 - A further independent security review of this tree before the first public release.
-- The `tailscale-serve` adapter's header behaviour on Linux.
+- The `tailscale-serve` adapter's header behaviour on Linux, and with a real non-owner tailnet identity.
 - A `local-tls` adapter (the relay on a non-loopback address behind its own certificate) is not implemented; the interface
   is built for it, and the listeners cannot be moved off loopback until it exists.
 - omp does not distribute a self-hostable relay; if it ever does, much of this plugin's value goes with it.

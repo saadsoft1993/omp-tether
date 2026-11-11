@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 
 MIN_OMP = (18, 18, 0)
-TESTED_OMP = ("18.18.3",)
+TESTED_OMP = ("18.18.0", "18.18.3")
 _VERSION = re.compile(r"(?:^|[^0-9.])(\d{1,4})\.(\d{1,4})\.(\d{1,4})(?![0-9])")
 
 

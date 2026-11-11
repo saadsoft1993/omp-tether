@@ -76,7 +76,7 @@ class InitTests(InitCase):
         self.assertIn("BUN_BE_BUN=1", bun)
         done = self.s.run_process([str(self.s.data_dir / "bin" / "omp-services"), "--version"])
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("omp-services 0.1.0", done.stdout)
+        self.assertIn("omp-services 0.1.1", done.stdout)
 
     def test_second_run_changes_nothing_and_leaves_units_running(self):
         self.s.write_config(heartbeat={"enabled": True})

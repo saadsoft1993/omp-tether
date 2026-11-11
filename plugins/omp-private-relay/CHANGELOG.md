@@ -3,6 +3,15 @@
 All notable changes to `omp-private-relay`. The protocols it implements have their own numbers (`pairing-store/1`,
 `relay-check/1`) and change only by spec; see `docs/protocol/` in the repository.
 
+## 0.1.1 (2026-11-11)
+
+The web client asset is unchanged (`omp-private-relay-web-18.18.tar`, same pin, still published with the `omp-private-relay-v0.1.0` release).
+
+- `--help` and `-h` print the command list and exit 0 (they exited 2, and `-h` was an unknown command).
+- The `tailscale` command is found when `PATH` is small (a service or an ssh session): the bare name is looked up on `PATH`, then in `/usr/local/bin`, `/opt/homebrew/bin` and the macOS app bundle; an absolute `auth.tailscale.bin` is used as given. The sign-in adapter uses the same lookup as `doctor`. When it is nowhere, `doctor`, `init` and `pair` name `auth.tailscale.bin` (and `OMP_PRIVATE_RELAY_TAILSCALE_BIN`).
+- A pairing link opened from another site (a chat, a mail client, a redirect) is still refused with 403, but the page now says why and how to fix it (paste the link into the address bar of the browser to pair) instead of only "cross-site request". A socket upgrade still gets the short reason.
+- Documents: the Tailscale Serve header behaviour was tested on a real Serve (macOS, Tailscale 1.104.5); the release evidence and threat model say so, and what was not tested (Linux, a non-owner tailnet identity). Tested omp versions: 18.18.0 and 18.18.3.
+
 ## 0.1.0 (2026-11-11)
 
 Review fixes (independent security reviews, every finding fixed or answered; tests in `tests/unit/review-fixes.test.ts`, and

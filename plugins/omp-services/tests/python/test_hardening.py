@@ -49,19 +49,53 @@ class Base(support.Case):
 
 
 class F1Adoption(Base):
-    def test_init_does_not_mark_an_existing_directory_and_purge_refuses_it(self):
+    def test_init_does_not_mark_an_existing_directory_and_purge_deletes_only_what_init_created_in_it(self):
+        # the README flow: another plugin's `dropins --write` created the configuration directory first
         self.s.config_dir.mkdir(parents=True)
         os.chmod(self.s.config_dir, 0o700)
         mine = self.s.config_dir / "mine.txt"
         mine.write_text("precious")
+        dropin = self.s.config_dir / "health.d" / "relay.json"
+        dropin.parent.mkdir(mode=0o700)
+        dropin.write_text("{}")
         rc, out, err = self.init()
         self.assertEqual(rc, 0, err)
         self.assertFalse((self.s.config_dir / ".omp-services-dir").exists(), "an existing directory is never adopted")
         self.assertTrue((self.s.data_dir / ".omp-services-dir").exists(), "a directory it created is marked")
+        self.assertTrue((self.s.config_dir / "config.json").exists())
+        rc, out, err = self.s.cli("purge", "--confirm-purge")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(mine.read_text(), "precious", "a file it did not create is never deleted")
+        self.assertEqual(dropin.read_text(), "{}", "another plugin's drop-in is never deleted")
+        self.assertTrue(self.s.config_dir.is_dir(), "a directory it did not create is left in place")
+        self.assertFalse((self.s.config_dir / "config.json").exists(), "what init wrote there is gone")
+        self.assertFalse((self.s.config_dir / "secrets").exists(), "what init created there is gone")
+        self.assertFalse(self.s.data_dir.exists(), "a directory it created is deleted")
+        self.assertFalse(self.s.state_dir.exists())
+
+    def test_purge_after_dropins_only_refuses_and_deletes_nothing(self):
+        # nothing was recorded as created by omp-services: an unmarked directory is not touched
+        self.s.config_dir.mkdir(parents=True)
+        os.chmod(self.s.config_dir, 0o700)
+        (self.s.config_dir / "mine.txt").write_text("precious")
         rc, out, err = self.s.cli("purge", "--confirm-purge")
         self.assertEqual(rc, 2)
-        self.assertEqual(mine.read_text(), "precious")
-        self.assertTrue(self.s.data_dir.exists(), "nothing was deleted at all")
+        self.assertIn("was not created by omp-services", err)
+        self.assertEqual((self.s.config_dir / "mine.txt").read_text(), "precious")
+
+    def test_a_forged_record_cannot_name_something_outside_the_directory(self):
+        self.s.config_dir.mkdir(parents=True)
+        os.chmod(self.s.config_dir, 0o700)
+        outside = self.s.home / "outside.txt"
+        outside.write_text("precious")
+        rc, out, err = self.init()
+        self.assertEqual(rc, 0, err)
+        record = self.s.config_dir / ".omp-services-entries"
+        self.assertTrue(record.exists(), "init records what it created in a directory it did not create")
+        record.write_text(record.read_text() + "../outside.txt\n")
+        rc, out, err = self.s.cli("purge", "--confirm-purge")
+        self.assertEqual(outside.read_text(), "precious")
+        self.assertEqual(rc, 2, "a record with a path component is refused")
 
     def test_a_forged_marker_with_other_content_does_not_count(self):
         self.init()

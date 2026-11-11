@@ -32,7 +32,9 @@ tested ones), Python 3.10 or newer. Not Windows. **No third-party Python package
   it (`init --restart-protected <plugin>.<name>`). The flag is remembered from what was installed, so a later declaration
   that drops it does not lift the protection.
 - **It never deletes a folder it did not create.** The marker that `purge` requires is written in the step that creates a
-  directory, never into one that already existed; such a directory is left unmarked and `purge` refuses it.
+  directory, never into one that already existed; such a directory is left unmarked. `init` records the entries it creates
+  inside it (in `.omp-services-entries`), and `purge` deletes exactly those, never the directory itself unless that leaves it
+  empty, and never a drop-in or anything else that is there (for example `~/.config/omp-services/health.d/*.json` that another plugin wrote).
 - **It does not put secrets in logs, in the config file or in command lines.** The heartbeat URL is stored in a `0600`
   file in a `0700` directory, read from standard input when you set it, and never printed.
 
@@ -175,7 +177,7 @@ release and state they still need, in place; add `--include-protected` to remove
 | `init [--plan [--json]] [--yes [--expect-plan DIGEST]] [--repin] [--restart-protected NAME]` | Shows the plan; applies it after a yes. Safe to repeat. `--expect-plan` applies only a plan with exactly the digest that was shown (the extension uses it) |
 | `doctor [--json] [--no-health] [--no-catalog] [--refresh-catalog]` | Reports; exit status 1 when anything fails |
 | `uninstall [--plan] [--yes] [--include-protected]` | Removes units, wrappers, code releases, state; **keeps** config, drop-ins, secrets, logs |
-| `purge [--plan] [--confirm-purge] [--include-protected]` | Everything above, then deletes the config, data and state directories. `--yes` is not enough: type `purge` or pass `--confirm-purge`. Refuses a directory it did not create (it needs its marker file), a link, or your home |
+| `purge [--plan] [--confirm-purge] [--include-protected]` | Everything above, then deletes the config, data and state directories. `--yes` is not enough: type `purge` or pass `--confirm-purge`. A directory it created is deleted whole; one that already existed (another plugin's `dropins --write` made `~/.config/omp-services`) loses only what `init` recorded creating in it. Refuses a directory with neither its marker file nor such a record, a link, or your home |
 | `heartbeat run [--once] [--no-ping] \| set-url \| clear-url \| status` | The service loop, or its settings |
 | `health --file FILE [--json]` | Runs one health drop-in once, report only |
 | `config path \| show \| validate` | The configuration |
@@ -226,9 +228,10 @@ omp plugin uninstall omp-services@omp-tether
 ```
 
 `purge` needs the wrapper, so run it before the plugin is uninstalled (if the wrapper is already gone, use the plugin's own
-launcher: `<plugin dir>/bin/omp-services purge`). `purge` removes only
-directories omp-services itself created; one that already existed (a plugin may have written a drop-in into
-`~/.config/omp-services` first) is left, and you remove it by hand.
+launcher: `<plugin dir>/bin/omp-services purge`). `purge` deletes a directory omp-services itself created whole. A directory
+that already existed (a plugin may have written a drop-in into `~/.config/omp-services` before `init` ran) is not deleted:
+`purge` removes from it only the entries `init` recorded creating there (`config.json`, `secrets/`), and leaves the directory,
+the drop-ins and everything else; remove those by hand. If `init` was never run, there is no record and `purge` refuses that directory.
 
 ## Develop
 

@@ -46,8 +46,9 @@ Scenario 4 and the adapter and slow-consumer behaviours below are exercised by t
 ## Not exercised in a browser, and why
 
 - **Slow-consumer cut (4008) and reconnect:** needs a stalled browser; covered by the relay's socket tests.
-- **`tailscale-serve` adapter:** the owner header comes from Tailscale Serve, which a scratch browser cannot reach; covered by
-  the socket tests with synthetic headers, and the header behaviour is **unverified on Linux**.
+- **`tailscale-serve` adapter:** a real Tailscale Serve (1.104.5, macOS) was tested on a second machine with a real browser over the tailnet: pair, open a session ("Live"),
+  revoke (the page closed with 4401 within 15 s); a forged `Tailscale-User-Login` was replaced by the real owner's login, a forged Funnel header was removed. The test tailnet had one user, so a request from a real
+  non-owner identity was not tried (proven only with forged headers on loopback), and the header behaviour is **unverified on Linux**.
 - **Linux and x86_64 browsers:** the suite and the conformance checks run in an Ubuntu 24.04 container (aarch64) as a non-root
   user; no browser was run there.
 - **A different omp minor:** each minor needs its own archive, pin and record.

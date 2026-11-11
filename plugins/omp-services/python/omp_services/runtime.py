@@ -380,7 +380,49 @@ def load_state(paths: Paths) -> dict[str, Any]:
 
 def save_state(paths: Paths, state: dict[str, Any]) -> None:
     state["updatedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    created = not os.path.lexists(paths.state_file)
     write_file(paths.state_file, json.dumps(state, indent=1, sort_keys=True) + "\n")
+    if created:
+        note_created(paths.data_dir, paths.state_file)
+
+
+ENTRIES_NAME = ".omp-services-entries"
+# Directories other plugins write their drop-ins into: omp-services never records them as its own, whoever created them.
+SHARED_NAMES = frozenset({"health.d", "services.d"})
+
+
+def note_created(root: Path, path: Path) -> None:
+    """Remember that this tool created `path` directly inside `root` when `root` itself is not ours (it existed before
+    `init`, for example because another plugin's `dropins --write` created it). `purge` deletes exactly these entries from
+    such a directory and nothing else. In a directory this tool created (it carries the marker) nothing is recorded: the
+    whole directory is ours."""
+    if path.parent != root or path.name in SHARED_NAMES or has_marker(root):
+        return
+    names = recorded_entries(root)
+    if path.name not in names:
+        write_file(root / ENTRIES_NAME, "".join(f"{name}\n" for name in [*names, path.name]))
+
+
+def recorded_entries(root: Path) -> list[str]:
+    """The names `init` recorded as created inside `root`. Raises when the record is not a plain file of ours or names
+    anything but a direct child (a path, `..`, the marker or the record itself, a shared drop-in directory)."""
+    record = root / ENTRIES_NAME
+    try:
+        st = os.lstat(record)
+    except FileNotFoundError:
+        return []
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():
+        raise ServicesError(f"{record} is not a plain file of yours")
+    names = [line for line in read_text(record, 16384, forbid=0o022).splitlines() if line]
+    for name in names:
+        if (
+            "/" in name
+            or "\0" in name
+            or name in (".", "..", ".omp-services-dir", ENTRIES_NAME)
+            or name in SHARED_NAMES
+        ):
+            raise ServicesError(f"{record} names {name!r}, which is not something omp-services creates directly in it")
+    return names
 
 
 def write_marker(directory: Path) -> None:

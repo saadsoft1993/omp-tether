@@ -217,7 +217,25 @@ def _tailscale(config: Config, env: Mapping[str, str], platform: Platform) -> li
         env=dict(env),
     )
     names, owner = adapter.identity()
+    configured = config.get("auth.tailscale.bin")
+    binary = find_tool("tailscale", configured, dict(env)) or (
+        TAILSCALE_APP if not configured and os.access(TAILSCALE_APP, os.X_OK) else None
+    )
     if not names or not owner:
+        if binary is None and not (config.get("auth.tailscale.owner") and config.get("auth.tailscale.publicHost")):
+            looked = (
+                configured or "PATH, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, /usr/bin and the Tailscale app"
+            )
+            out.append(
+                _f(
+                    "tailscale",
+                    FAIL,
+                    f"the tailscale command was not found (looked at {looked}), so this machine's owner and name are not known: every request gets 503",
+                    "set auth.tailscale.bin in the config file (or OMP_DASHBOARD_TAILSCALE_BIN) to the absolute path of the tailscale command, "
+                    "for example /Applications/Tailscale.app/Contents/MacOS/Tailscale; or set auth.tailscale.owner and auth.tailscale.publicHost",
+                )
+            )
+            return out
         out.append(
             _f(
                 "tailscale",
@@ -228,9 +246,6 @@ def _tailscale(config: Config, env: Mapping[str, str], platform: Platform) -> li
         )
         return out
     out.append(_f("tailscale", OK, f"owner and machine name known ({len(names)} name(s))"))
-    binary = find_tool("tailscale", config.get("auth.tailscale.bin"), dict(env)) or (
-        TAILSCALE_APP if os.access(TAILSCALE_APP, os.X_OK) else None
-    )
     if binary is None:
         out.append(
             _f(

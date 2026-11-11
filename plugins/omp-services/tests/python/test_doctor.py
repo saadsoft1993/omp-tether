@@ -46,7 +46,7 @@ class FreshAndHealthy(DoctorCase):
         self.init()
         rc, out, _ = self.s.cli("doctor", "--no-catalog")
         self.assertEqual(rc, 0)
-        self.assertIn("omp-services doctor 0.1.0", out)
+        self.assertIn("omp-services doctor 0.1.1", out)
         self.assertIn("0 failure(s)", out)
         os.chmod(self.s.config_dir / "config.json", 0o666)
         rc, out, _ = self.s.cli("doctor", "--no-catalog")

@@ -54,7 +54,7 @@ class SlashCommandInRealOmp(unittest.TestCase):
 
     def test_1_doctor_reports_that_nothing_is_set_up_and_changes_nothing(self):
         self.omp.type("/omp-services doctor")
-        kit.wait_for(lambda: "omp-services doctor 0.1.0" in self.omp.text(), timeout=90, what="the doctor notice")
+        kit.wait_for(lambda: "omp-services doctor 0.1.1" in self.omp.text(), timeout=90, what="the doctor notice")
         text = self.omp.text()
         self.assertIn("has not been set up", text)
         self.assertIn("omp-services init", text)

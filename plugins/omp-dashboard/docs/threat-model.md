@@ -44,8 +44,9 @@ These are not defended against, and nothing here claims otherwise.
   the browser. `Max-Age` and `pairing.maxAgeDays` (default 90) limit how long a lost browser stays paired, and `revoke` ends it at once.
 - **The tailnet transport.** With `tailscale-serve` the hub trusts what Tailscale Serve says (the caller's login, the host the caller used) because the
   hub listens on loopback only and Serve is the only thing in front. A flaw in Tailscale, a mistaken Serve rule or a Serve version that does not strip a
-  caller's own `Tailscale-User-Login` is theirs: the cookie is what still stands. Whether Serve removes a header the caller sent has **not** been tested here
-  against a real Serve (a stand-in command was used); the hub refuses a request that carries the headers it reads twice.
+  caller's own `Tailscale-User-Login` is theirs: the cookie is what still stands. A real Serve (Tailscale 1.104.5, macOS) was tested: it replaced a
+  `Tailscale-User-Login` the caller sent (once or twice) with the real owner's login, removed a caller-sent `Tailscale-Funnel-Request`, and replaced a caller-sent
+  `X-Forwarded-For`; the hub also refuses a request that carries the headers it reads twice.
 - **Pid reuse between a check and a signal.** Kill and Force kill look at a process's owner, command and start time just before signalling; a pidfd would close the
   remaining gap but is not available on macOS, so the gap (microseconds) is documented rather than closed.
 - **The contents of a session.** The relay passes sealed messages; the hub never sees them.
@@ -89,6 +90,6 @@ look-alikes and oversized or multi-byte answers; Kill and Force kill against rea
 Start path validation and the typed text; the page's pins; the file-trust walk. A mutation check switches off a list of guards one at a time and requires
 a test to fail; it is not a list of every guard.
 
-Not tested: Tailscale Serve on a real tailnet (a stand-in command only, so whether Serve strips a caller's own `Tailscale-User-Login` is unverified, as is the Host it forwards);
-herdr (a stand-in command only, none was installed); Force kill of a process tree that a real omp left running, beyond real processes the tests started; Linux beyond the container runs
+Not tested: a real tailnet identity that is not the owner arriving through Serve (the test tailnet had one user, so that refusal is proven only with forged headers on loopback); Serve on Linux;
+herdr on Linux (herdr 0.9.5 on macOS was tested for real); Force kill of a process tree that a real omp left running, beyond real processes the tests started; Linux beyond the container runs
 recorded in the release evidence.

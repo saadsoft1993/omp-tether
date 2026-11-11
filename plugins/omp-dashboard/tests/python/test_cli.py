@@ -43,7 +43,7 @@ class Basics(ScratchTestCase):
         self.assertEqual(cli(self.s, "config", "validate", "--replace").returncode, 2)
 
     def test_version_and_config_commands(self) -> None:
-        self.assertIn("omp-dashboard 0.1.0", cli(self.s, "--version").stdout)
+        self.assertIn("omp-dashboard 0.1.1", cli(self.s, "--version").stdout)
         self.assertEqual(cli(self.s, "config", "path").stdout.strip(), str(self.s.paths().config_file))
         self.assertIn("defaults are in use", cli(self.s, "config", "validate").stdout)
         shown = cli(self.s, "config", "show")
@@ -384,14 +384,14 @@ class Doctor(ScratchTestCase):
         s.save_fake()
         self.assertEqual(self.findings(s)["collab"].level, "fail")
 
-    def test_an_omp_older_than_the_tested_version_is_not_called_newer(self) -> None:
+    def test_an_omp_between_the_tested_versions_is_not_called_newer(self) -> None:
         s = self.make()
-        s.fake_state["version"] = "omp/18.18.0"  # at the supported minimum, below the tested 18.18.3
+        s.fake_state["version"] = "omp/18.18.1"  # supported, between the tested 18.18.0 and 18.18.3
         s.save_fake()
         finding = self.findings(s)["omp"]
         self.assertEqual(finding.level, "warn")
         self.assertNotIn("newer", finding.message)
-        self.assertIn("18.18.0", finding.message)
+        self.assertIn("18.18.1", finding.message)
         self.assertIn("not one of the versions", finding.message)
 
     def test_a_hub_that_is_running_and_a_port_held_by_someone_else(self) -> None:
@@ -440,6 +440,17 @@ class Doctor(ScratchTestCase):
             f = self.findings(s)
             self.assertEqual(f["tailscale"].level, "ok")
             self.assertEqual(f["serve-route"].level, expected, serve)
+
+    def test_a_missing_tailscale_command_is_named_with_its_config_key(self) -> None:
+        s = self.make()
+        missing = str(s.root / "nowhere" / "tailscale")
+        s.write_config({"auth": {"adapter": "tailscale-serve", "tailscale": {"bin": missing, "servePort": 8443}}})
+        finding = self.findings(s)["tailscale"]
+        self.assertEqual(finding.level, "fail")
+        self.assertIn("tailscale command was not found", finding.message)
+        self.assertIn(missing, finding.message)
+        self.assertIn("auth.tailscale.bin", finding.fix)
+        self.assertIn("OMP_DASHBOARD_TAILSCALE_BIN", finding.fix)
 
     def test_the_rendering_names_the_fix_only_for_problems_and_json_is_machine_readable(self) -> None:
         text = doctor.render(

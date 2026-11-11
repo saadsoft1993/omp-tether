@@ -13,7 +13,7 @@ starts new ones, from a phone or another computer as well as from the machine it
   expire after 90 days. Nothing is started, edited or sent without a click or a command of yours.
 - **No accounts, no analytics, no third-party assets.** The page is served from this plugin with a strict Content-Security-Policy.
 
-Supported: macOS and Linux, omp 18.18.x (tested on 18.18.3), Python 3.10 or newer (standard library only), one trusted user account.
+Supported: macOS and Linux, omp 18.18.x (tested on 18.18.0 and 18.18.3), Python 3.10 or newer (standard library only), one trusted user account.
 Not supported: Windows; machines several people share (see [Who this protects against](#who-this-protects-against)).
 
 ## Install and run
@@ -66,7 +66,7 @@ relay; `doctor` checks both.
 - **`tailscale-serve`**: expose the hub on your tailnet only, never Funnel: `tailscale serve --bg --https=<servePort> http://127.0.0.1:<listen.port>`.
   Requests must carry your Tailscale login (set by Serve), this machine's name as `Host`, and the matching `Origin`; Funnel requests and
   tagged devices are refused; until the owner is known every request gets 503. The owner and name are read from `tailscale status --json`
-  every minute, or fixed with `auth.tailscale.owner` and `publicHost`. A request that carries `Host`, `Tailscale-User-Login` or `Tailscale-Funnel-Request` twice is refused. That Serve replaces a login the caller sent was **not** tested against a real Serve (a stand-in command only); the pairing cookie is what still stands if it does not.
+  every minute, or fixed with `auth.tailscale.owner` and `publicHost`. A request that carries `Host`, `Tailscale-User-Login` or `Tailscale-Funnel-Request` twice is refused. What a real Serve does to forged headers was tested (Tailscale 1.104.5, macOS): a `Tailscale-User-Login` the caller sent was replaced by the real owner's login, a `Tailscale-Funnel-Request` the caller sent was removed, and a caller-sent `X-Forwarded-For` was replaced. A request from a different, real tailnet identity (a second account or a shared device) was **not** tested, because the test tailnet had one user; that refusal is proven only with forged headers on loopback. The pairing cookie is checked after the sign-in in any case.
 
 The pairing cookie is not scoped to a port: a browser sends it to every service on the same host name, so on `127.0.0.1` another local web server sees
 it, and a hub on another port receives it. Over `tailscale-serve` the cookie is `Secure`. A `__Host-` cookie name is not available (the name is limited to letters, digits and `_`).
@@ -115,7 +115,7 @@ your shell (`dropins --write` refuses while any are set). Changes need a restart
 | `listen.port` | `OMP_DASHBOARD_PORT` | `17795` | The port the hub listens on. |
 | `auth.adapter` | `OMP_DASHBOARD_AUTH` | `"loopback-only"` | Who may even ask. loopback-only: the pairing cookie alone, on a loopback Host. tailscale-serve: requests must come through Tailscale Serve and name this machine's owner, besides the cookie. |
 | `auth.loopbackOnly.allowedHosts` |  | `[]` | Extra host:port values the browser may use, for an SSH forward on another local port. |
-| `auth.tailscale.bin` | `OMP_DASHBOARD_TAILSCALE_BIN` | `null` | Absolute path of the tailscale command. null: found on PATH, then the macOS app bundle. |
+| `auth.tailscale.bin` | `OMP_DASHBOARD_TAILSCALE_BIN` | `null` | Absolute path of the tailscale command. null: found on PATH, then in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, then the macOS app bundle. `doctor` names this key when it cannot find the command. |
 | `auth.tailscale.servePort` | `OMP_DASHBOARD_TAILSCALE_SERVE_PORT` | `null` | The https port of `tailscale serve` that forwards to the hub. null: the same number as listen.port. |
 | `auth.tailscale.owner` | `OMP_DASHBOARD_TAILSCALE_OWNER` | `null` | Owner login. null: read from Tailscale. With publicHost, Tailscale is not asked at all. |
 | `auth.tailscale.publicHost` | `OMP_DASHBOARD_TAILSCALE_HOST` | `null` | This machine's MagicDNS name. null: read from Tailscale. |
@@ -156,7 +156,7 @@ Other variables read: `OMP_BIN`, `HERDR_BIN`, `OMP_SESSION_CONTROL_DIR`, `PI_COD
 `start.backend` `herdr` opens a tab labelled `omp` in the project's herdr workspace (created when there is none); `tmux` opens a window in
 one tmux session (`start.tmux.session`, created when missing). Only folders from the hub's own list (`start.roots` and the git repositories
 below them, to `start.maxDepth`) are accepted, passed as one argument (no shell), and the **only text typed into the new pane is `omp`**.
-tmux 3.4 was exercised (a real server); herdr was not available and its backend is tested against a stand-in command only. In tmux a `#` in a folder name is doubled so a folder called `a#(x)` is that folder, and a path with a `;` is refused. The Start list is in alphabetical order unless you set
+tmux 3.4 and herdr 0.9.5 were exercised for real (a real tmux server, and a real herdr server in a scratch home: Start opened a workspace, a tab labelled `omp` and a pane running `omp`). In tmux a `#` in a folder name is doubled so a folder called `a#(x)` is that folder, and a path with a `;` is refused. The Start list is in alphabetical order unless you set
 `projects.rankBySessions`, which reads the names and modification times (never the contents) of omp's session folders.
 
 ## Phone alerts (ntfy)

@@ -18,7 +18,7 @@ against a new omp release before adding that release to `tested`.
 
 ### `omp-private-relay`
 
-Tested with omp 18.18.3 (the web client's patch also applies, byte for byte, to the 18.18.0 sources). The relay uses omp
+Tested with omp 18.18.0 and 18.18.3 (the web client's patch also applies, byte for byte, to the 18.18.0 sources; the pinned build is from v18.18.3). The relay uses omp
 through its command line and its Collab wire contract only (see `ompInterfaces` in `compat.json`), not through the
 extension API. Its web client is **built per omp minor** from omp's release tag and pinned by hash (`webBuilds` in
 `compat.json`, mirrored in `plugins/omp-private-relay/web-builds.json`); a minor without a build needs a patch file
@@ -27,7 +27,7 @@ built with the same Bun gives the same content hash, which a release job compare
 
 ### `omp-dashboard`
 
-Tested with omp 18.18.3. It uses omp through its command line only (`omp --version`, `omp collab list --json` and `omp collab link --json` at JSON version 1, `omp config get`), plus `session-control/1` for Stop and Rename and `relay-check/1` for the relay. `doctor` fails on an omp older than 18.18.0 and warns on a version not listed in `ompTested`. The dashboard page is built with Bun and committed, pinned by hashes (`plugins/omp-dashboard/ui-build.json`).
+Tested with omp 18.18.0 and 18.18.3. It uses omp through its command line only (`omp --version`, `omp collab list --json` and `omp collab link --json` at JSON version 1, `omp config get`), plus `session-control/1` for Stop and Rename and `relay-check/1` for the relay. `doctor` fails on an omp older than 18.18.0 and warns on a version not listed in `ompTested`. The dashboard page is built with Bun and committed, pinned by hashes (`plugins/omp-dashboard/ui-build.json`).
 
 ## Bun
 
@@ -40,7 +40,7 @@ Ubuntu. macOS's own `/usr/bin/python3` is 3.9 and is refused with a message that
 
 ## Platforms
 
-macOS and Linux. Not Windows: omp uses named pipes there, and this repository's plugins use Unix sockets. Listener ownership checks use `lsof` on macOS and `/proc/net/tcp` (or `ss`) on Linux. Tailscale Serve's header behaviour was not tested against a real Serve.
+macOS and Linux. Not Windows: omp uses named pipes there, and this repository's plugins use Unix sockets. Listener ownership checks use `lsof` on macOS and `/proc/net/tcp` (or `ss`) on Linux. Tailscale Serve's header behaviour was tested against a real Serve on macOS (Tailscale 1.104.5: a caller-sent `Tailscale-User-Login` is replaced, a caller-sent Funnel header is removed); not on Linux, and not with a real non-owner tailnet identity.
 
 ## Protocols
 

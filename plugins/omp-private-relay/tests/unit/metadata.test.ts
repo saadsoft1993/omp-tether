@@ -29,7 +29,7 @@ describe("package, catalog, changelog and compat.json agree", () => {
 		for (const f of pkg.files as string[]) expect(fs.existsSync(path.join(PLUGIN_ROOT, f)), f).toBe(true);
 	});
 
-	test("the version is the same in package.json, the catalog, the changelog and compat.json, and the release tag of web-builds.json", () => {
+	test("the version is the same in package.json, the catalog, the changelog and compat.json; the web client's release tag names an existing release that is not newer than the plugin", () => {
 		const catalog = obj(json(REPO, ".omp-plugin", "marketplace.json"));
 		const entry = (catalog.plugins as Array<Record<string, unknown>>).find(p => p.name === "omp-private-relay");
 		expect(entry?.version).toBe(pkg.version);
@@ -37,7 +37,12 @@ describe("package, catalog, changelog and compat.json agree", () => {
 		expect(read(PLUGIN_ROOT, "CHANGELOG.md")).toContain(`## ${pkg.version}`);
 		const compat = obj(obj(json(REPO, "compat.json").plugins)["omp-private-relay"]);
 		expect(compat.version).toBe(pkg.version);
-		expect(loadWebBuilds().releaseTag).toBe(`omp-private-relay-v${pkg.version}`);
+		// The asset is published with the release that first carried it and stays there while the web client is unchanged: a later
+		// plugin version names that older release, never a newer one.
+		const tag = /^omp-private-relay-v(\d+)\.(\d+)\.(\d+)$/.exec(loadWebBuilds().releaseTag);
+		expect(tag, loadWebBuilds().releaseTag).not.toBeNull();
+		expect(Bun.semver.order(tag!.slice(1, 4).join("."), String(pkg.version))).toBeLessThanOrEqual(0);
+		expect(read(PLUGIN_ROOT, "CHANGELOG.md")).toContain(`## ${tag!.slice(1, 4).join(".")}`);
 	});
 
 	test("compat.json lists the protocols, the platforms, and exactly the web builds that web-builds.json pins", () => {

@@ -353,6 +353,17 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		return ["browser not paired", "", "This browser has not been paired with the relay, so it will not open sessions.", "", ...how].join("\n");
 	}
 
+	function crossSiteHelp(): string {
+		return [
+			"cross-site request",
+			"",
+			"This page was opened from another site (a chat, a mail client, a document or a redirect), and the relay does not accept being opened that way.",
+			"",
+			"To fix it: copy the link, paste it into the address bar of the browser you want to use, and press Enter. If the link has expired or was already used, run:",
+			"       omp-private-relay pair",
+		].join("\n");
+	}
+
 	// ── room plumbing ───────────────────────────────────────────────────────────────────────────
 	function relayQueued(): number {
 		let total = 0;
@@ -659,6 +670,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 				const shown = url.pathname.startsWith("/r/") ? "/r/…" : /^\/[A-Za-z0-9._-]{0,63}$/.test(url.pathname) ? url.pathname : "(other)";
 				log("denied", { listener: "guest", path: shown, upgrade, status: gate.status, reason: gate.reason });
 				if (gate.status === 401 && !upgrade) return text(401, notPairedHelp());
+				if (gate.reason === "cross-site request" && !upgrade) return text(gate.status, crossSiteHelp());
 				return text(gate.status, gate.reason);
 			}
 			if (pairingOwn && req.method === "POST" && url.pathname === "/__pair") return redeem(req);

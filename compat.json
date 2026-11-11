@@ -3,7 +3,7 @@
 	"omp": {
 		"minimum": "18.18.0",
 		"tested": ["18.18.0"],
-		"note": "Only listed versions have been run. Newer versions are expected to work but are untested until listed."
+		"note": "`tested` is the list for omp-session-control and omp-services; omp-private-relay and omp-dashboard list theirs as `ompTested` under `plugins`. Only listed versions have been run. Newer versions are expected to work but are untested until listed."
 	},
 	"bun": {
 		"minimum": "1.4.4",
@@ -46,7 +46,7 @@
 			]
 		},
 		"omp-services": {
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"extensionId": "extension-module:omp-services",
 			"protocols": ["health/1", "services/1", "config/1"],
 			"platforms": ["darwin", "linux"],
@@ -61,10 +61,10 @@
 			"note": "The command line also reads omp's cached marketplace catalog (<plugins root>/cache/marketplaces/<name>/marketplace.json), found from the installPath that `omp plugin list --json` reports."
 		},
 		"omp-private-relay": {
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"protocols": ["pairing-store/1", "relay-check/1"],
 			"platforms": ["darwin", "linux"],
-			"ompTested": ["18.18.3"],
+			"ompTested": ["18.18.0", "18.18.3"],
 			"runtime": "The Bun embedded in omp (BUN_BE_BUN=1 <omp> <script>), 1.4.4 or newer: the relay refuses to start on an older one.",
 			"ompInterfaces": [
 				"omp --version prints omp/<major.minor.patch> when BUN_BE_BUN is not set (init, doctor and rebuild-web read the minor from it)",
@@ -88,11 +88,11 @@
 			"note": "The patch applies unchanged to v18.18.0 and v18.18.3; the pinned build is from v18.18.3. A new omp minor needs its own patch file and build."
 		},
 		"omp-dashboard": {
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"protocols": ["pairing-store/1", "session-control/1", "relay-check/1", "services/1", "health/1", "config/1"],
 			"platforms": ["darwin", "linux"],
 			"python": ">=3.10",
-			"ompTested": ["18.18.3"],
+			"ompTested": ["18.18.0", "18.18.3"],
 			"ompInterfaces": [
 				"omp --version prints omp/<major.minor.patch>",
 				"omp collab list --json and omp collab link <instanceId> [--view] --json, JSON version 1",

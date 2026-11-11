@@ -3,6 +3,13 @@
 All notable changes to `omp-dashboard`. The protocols it speaks (`pairing-store/1`, `session-control/1`, `relay-check/1`, `services/1`,
 `health/1`) have their own numbers and change only by spec; see `docs/protocol/` in the repository.
 
+## 0.1.1 (2026-11-11)
+
+- `doctor` no longer calls an omp that is older than the newest tested version "newer than the versions tested"; it says the version is supported but not one of the tested ones.
+- Tested omp versions are 18.18.0 and 18.18.3, stated once in `compat.json` and checked against the code, the README and `docs/compat.md` by a test (the code and `compat.json` disagreed about the tested list).
+- `doctor` names `auth.tailscale.bin` (and `OMP_DASHBOARD_TAILSCALE_BIN`) when the `tailscale` command cannot be found and the owner and machine name are not fixed in the config; the macOS app-bundle fallback applies only when no path is configured, the same rule the sign-in uses.
+- Documents: a real Tailscale Serve (macOS, Tailscale 1.104.5) was tested: it replaced a caller-sent `Tailscale-User-Login`, removed a caller-sent Funnel header and replaced `X-Forwarded-For`; herdr 0.9.5 Start was tested for real. Not tested: a non-owner tailnet identity, Serve and herdr on Linux.
+
 ## 0.1.0 (2026-11-11)
 
 First release. It generalises a hub that ran for one person on two machines.

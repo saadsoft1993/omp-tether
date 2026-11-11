@@ -73,6 +73,18 @@ describe("token adapter: identity layer", () => {
 		expect(csp).toContain("default-src 'none'");
 	});
 
+	test("a link followed from another site is refused (403) with a plain explanation and the fix, not only 'cross-site request'", async () => {
+		const r = await rawRequest(relay.guestPort, "/pair", { Cookie: "", "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document", Accept: "text/html" });
+		expect(r.status).toBe(403);
+		expect(r.body).toContain("another site");
+		expect(r.body).toContain("address bar");
+		expect(r.body).toContain("omp-private-relay pair");
+		// the explanation never reflects anything the client sent, and a socket upgrade still gets only the short reason
+		const ws = await rawRequest(relay.guestPort, `/r/${room}?role=guest`, guestHeaders(relay, { "Sec-Fetch-Site": "cross-site" }), { upgrade: true });
+		expect(ws.status).toBe(403);
+		expect(ws.body).toBe("cross-site request");
+	});
+
 	test("a host (an omp session) still connects on the loopback listener and a paired page reaches it through the relay", async () => {
 		const id = makeRoomId("tok");
 		const h = hostPeer(relay, id);

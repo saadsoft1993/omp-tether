@@ -313,7 +313,8 @@ def plan_init(
             raise ServicesError(f"{directory} {problem}; fix or remove it, then run init again")
         elif directory in roots and not runtime.has_marker(directory):
             plan.notes.append(
-                f"{shown(directory)} already existed, so it is left unmarked: `purge` will never delete it (remove it by hand)"
+                f"{shown(directory)} already existed, so it is left unmarked: `purge` deletes only the entries init creates "
+                "in it (recorded in .omp-services-entries) and leaves the directory and everything else in it"
             )
 
     if not paths.config_file.exists():
@@ -569,6 +570,9 @@ def _make_dir(directory: Path, roots: set[Path]) -> Callable[[], str | None]:
         # into one that was already there.
         if directory in roots and not existed:
             runtime.write_marker(directory)
+        elif not existed:
+            for root in roots:
+                runtime.note_created(root, directory)
         return None
 
     return run
@@ -576,7 +580,10 @@ def _make_dir(directory: Path, roots: set[Path]) -> Callable[[], str | None]:
 
 def _write_default_config(paths: Paths) -> Callable[[], str | None]:
     def run() -> str | None:
+        created = not os.path.lexists(paths.config_file)
         write_file(paths.config_file, config_mod.default_config_text(), 0o600)
+        if created:
+            runtime.note_created(paths.config_dir, paths.config_file)
         return None
 
     return run
@@ -783,9 +790,17 @@ def purge_problems(setup: Setup) -> list[str]:
         elif root == home or root in home.parents or root == Path("/"):
             problems.append(f"{root} is, or contains, your home directory")
         elif not runtime.has_marker(root):
-            problems.append(
-                f"{root} was not created by omp-services (it has no {'.omp-services-dir'} marker): remove it by hand if you want it gone"
-            )
+            try:
+                recorded = runtime.recorded_entries(root)
+            except ServicesError as exc:
+                problems.append(str(exc))
+                continue
+            if not (root / runtime.ENTRIES_NAME).exists():
+                problems.append(
+                    f"{root} was not created by omp-services (it has no {'.omp-services-dir'} marker) and init recorded nothing in it: remove it by hand if you want it gone"
+                )
+            elif not recorded:
+                problems.append(f"{root} has an empty record of what omp-services created in it: remove it by hand")
     return problems
 
 
@@ -799,11 +814,49 @@ def plan_purge(setup: Setup, state: dict[str, Any], *, include_protected: bool =
             "purge refused: protected units are still installed; add --include-protected to stop and remove them too"
         )
     for root in setup.paths.roots():
-        if root.exists():
+        if not root.exists():
+            continue
+        if runtime.has_marker(root):
             plan.steps.append(
                 Step("delete", f"{setup.show(root)} and everything in it (including secrets)", _delete_tree(root))
             )
+        else:
+            names = runtime.recorded_entries(root)
+            plan.steps.append(
+                Step(
+                    "delete",
+                    f"from {setup.show(root)}, which omp-services did not create, only what init created in it: "
+                    f"{', '.join(names)} (the directory and everything else in it stay)",
+                    _delete_recorded(root, names),
+                    payload=f"{root}:{','.join(names)}",
+                )
+            )
     return plan
+
+
+def _delete_recorded(root: Path, names: list[str]) -> Callable[[], str | None]:
+    """Delete exactly the recorded entries of a directory this tool did not create, then the record, and the directory
+    only when that leaves it empty."""
+
+    def run() -> str | None:
+        if dir_problem(root, forbid=0o000) or runtime.has_marker(root):
+            raise ServicesError(f"refusing to delete inside {root}: it changed since the plan was made")
+        if runtime.recorded_entries(root) != names:
+            raise ServicesError(f"refusing to delete inside {root}: the record of what omp-services created changed")
+        for name in names:
+            target = root / name
+            if os.path.islink(target) or target.is_file():
+                os.unlink(target)
+            elif target.is_dir():
+                shutil.rmtree(target)
+        os.unlink(root / runtime.ENTRIES_NAME)
+        try:
+            root.rmdir()
+        except OSError:
+            pass  # something that is not ours is in it: it stays
+        return None
+
+    return run
 
 
 def _delete_tree(root: Path) -> Callable[[], str | None]:

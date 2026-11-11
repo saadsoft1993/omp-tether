@@ -3,6 +3,10 @@
 All notable changes to `omp-services`. The protocols have their own numbers (`health/1`, `services/1`, `config/1`) and
 change only by spec; see `docs/protocol/` in the repository.
 
+## 0.1.1 (2026-11-11)
+
+- `purge` works after another plugin's `dropins --write` created `~/.config/omp-services` before `init` (the order the plugins' READMEs use): it used to refuse every directory because that one had no marker. `init` now records the entries it creates inside a directory that already existed (`.omp-services-entries`), and `purge` deletes exactly those, never the directory itself unless that leaves it empty, and never a drop-in or anything else in it. A directory with neither its marker nor a record is still refused, a record that names anything but a direct child is refused, and the health and services drop-in directories are never recorded as ours.
+
 ## 0.1.0 (2026-11-11)
 
 First release.

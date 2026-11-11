@@ -148,7 +148,7 @@ async function ompSettingLines(config: Config): Promise<{ lines: string[]; note?
 	const servePort = config.auth.tailscale.servePort ?? config.listen.guestPort;
 	const origin = link ? link.slice(0, link.indexOf("/pair")) : `https://<this-machine>.<your-tailnet>.ts.net${servePort === 443 ? "" : `:${servePort}`}`;
 	lines.push(`omp config set collab.webUrl ${origin}`);
-	return link ? { lines } : { lines, note: "Tailscale did not answer, so the machine's name is a placeholder: replace it with the name `tailscale status` shows for this machine." };
+	return link ? { lines } : { lines, note: "Tailscale did not answer, so the machine's name is a placeholder: replace it with the name `tailscale status` shows for this machine. If the tailscale command is not on PATH (and not in /usr/local/bin, /opt/homebrew/bin or the Tailscale app), set auth.tailscale.bin in the config file, or OMP_PRIVATE_RELAY_TAILSCALE_BIN, to its absolute path." };
 }
 
 async function cmdInit(args: Args, env: Env, io: Io, deps: CliDeps): Promise<number> {
@@ -414,7 +414,7 @@ async function cmdPair(env: Env, io: Io): Promise<number> {
 	await auth.settled();
 	run.stop();
 	if (!auth.pairingLink("x")) {
-		io.err("Tailscale did not tell this machine's name, so there is no address to print. Start Tailscale, or set auth.tailscale.publicHost and owner in the config. No link was made.\n");
+		io.err("Tailscale did not tell this machine's name, so there is no address to print. Start Tailscale, set auth.tailscale.bin (or OMP_PRIVATE_RELAY_TAILSCALE_BIN) to the absolute path of the tailscale command if it cannot be found, or set auth.tailscale.publicHost and owner in the config. No link was made.\n");
 		return 1;
 	}
 	// Only now is a token created: a failure above must not leave one behind.

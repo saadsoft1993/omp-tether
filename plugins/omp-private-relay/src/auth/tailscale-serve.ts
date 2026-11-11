@@ -5,6 +5,7 @@
 // The owner and the name come from `tailscale status --json` (or from the configuration) and are refreshed every
 // minute; while they are unknown every guest request is answered 503 (fail closed), and when they change the guests
 // that were admitted under the old identity are dropped.
+import { findTailscale } from "../runtime";
 import type { AdapterHooks, GuestAuth, RequestFacts, Verdict } from "./types";
 
 export interface TailscaleSelf {
@@ -43,7 +44,7 @@ export function parseTailscaleStatus(json: string): TailscaleSelf | null {
 export function lookupFromCommand(bin: string): () => Promise<TailscaleSelf | null> {
 	return async () => {
 		try {
-			const proc = Bun.spawn([bin, "status", "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore", timeout: 5_000 });
+			const proc = Bun.spawn([findTailscale(bin) ?? bin, "status", "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore", timeout: 5_000 });
 			const [text, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
 			return code === 0 ? parseTailscaleStatus(text) : null;
 		} catch {

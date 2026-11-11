@@ -18,7 +18,7 @@
 		{
 			"name": "omp-services",
 			"source": "./plugins/omp-services",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"description": "Sets up and checks the background services other omp plugins need: launchd and systemd user units, a heartbeat that runs health checks other plugins contribute, doctor. Nothing is installed until you confirm a plan.",
 			"license": "MIT",
 			"category": "productivity",
@@ -27,7 +27,7 @@
 		{
 			"name": "omp-private-relay",
 			"source": "./plugins/omp-private-relay",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"description": "A Collab relay that runs on your own machine, with a patched browser client and per-browser pairing, so session links never go through omp's public relay. Does nothing until you run its init.",
 			"license": "MIT",
 			"category": "productivity",
@@ -36,7 +36,7 @@
 		{
 			"name": "omp-dashboard",
 			"source": "./plugins/omp-dashboard",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"description": "A local dashboard for your own omp sessions: list, open (through your private relay), stop, rename, kill and start them, with per-browser pairing. Does nothing until you run it.",
 			"license": "MIT",
 			"category": "productivity",

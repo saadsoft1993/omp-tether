@@ -152,7 +152,9 @@ Every request must then carry your Tailscale login (set by Serve), this machine'
 `Origin`; requests that arrive through Funnel are refused. The owner and the name are read from `tailscale status --json`
 and refreshed every minute; until they are known, every browser request gets `503`, and when they change the open pages
 are closed. `omp-private-relay doctor` checks the Serve route and warns when Funnel is switched on for it. Pair the phone
-with `omp-private-relay pair` (the link names this machine's tailnet address).
+with `omp-private-relay pair` (the link names this machine's tailnet address). A real Serve was tested on macOS (Tailscale 1.104.5): it replaced a `Tailscale-User-Login` header sent by the caller with the real owner's login and removed a caller-sent Funnel header; Linux and a second, non-owner tailnet identity were not tested (see `docs/threat-model.md`).
+
+A pairing link that is opened from another site (a chat, a mail client, a redirect) is refused with a short explanation: copy the link and paste it into the address bar of the browser you want to pair.
 
 ## Check it
 
@@ -182,7 +184,7 @@ group or others can write is refused, with every problem listed. The JSON Schema
 | `listen.guestPort` | `OMP_PRIVATE_RELAY_GUEST_PORT` | 17796 | Where browsers connect |
 | `auth.adapter` | `OMP_PRIVATE_RELAY_AUTH` | `token` | `token` or `tailscale-serve` |
 | `auth.token.allowedHosts` | | `[]` | Extra `host:port` values for an SSH forward on another local port |
-| `auth.tailscale.bin` | `OMP_PRIVATE_RELAY_TAILSCALE_BIN` | `tailscale` | The tailscale command |
+| `auth.tailscale.bin` | `OMP_PRIVATE_RELAY_TAILSCALE_BIN` | `tailscale` | The tailscale command: the bare name is looked up on `PATH`, then in `/usr/local/bin`, `/opt/homebrew/bin` and the macOS app bundle (`/Applications/Tailscale.app/Contents/MacOS/Tailscale`); an absolute path is used as given. `doctor` and `init` name this key when the command cannot be found (a service or an ssh session often has a `PATH` without `/usr/local/bin`) |
 | `auth.tailscale.servePort` | `OMP_PRIVATE_RELAY_TAILSCALE_SERVE_PORT` | guest port | The https port of `tailscale serve` |
 | `auth.tailscale.owner` | `OMP_PRIVATE_RELAY_TAILSCALE_OWNER` | read from Tailscale | Owner login (with `publicHost`: no Tailscale lookups at all) |
 | `auth.tailscale.publicHost` | `OMP_PRIVATE_RELAY_TAILSCALE_HOST` | read from Tailscale | This machine's MagicDNS name |
