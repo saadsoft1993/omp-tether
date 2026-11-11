@@ -27,9 +27,9 @@
 			"properties": {
 				"adapter": {
 					"type": "string",
-					"enum": ["loopback-only", "tailscale-serve"],
+					"enum": ["loopback-only", "tailscale-serve", "both"],
 					"default": "loopback-only",
-					"description": "Who may even ask. loopback-only: the pairing cookie alone, on a loopback Host. tailscale-serve: requests must come through Tailscale Serve and name this machine's owner, besides the cookie."
+					"description": "Who may even ask. loopback-only: the pairing cookie alone, on a loopback Host. tailscale-serve: requests must come through Tailscale Serve and name this machine's owner, besides the cookie. both: a request with any sign of a proxy is judged by the tailscale-serve rules, one with none by the loopback-only rules; the local address keeps working while Tailscale is off."
 				},
 				"loopbackOnly": {
 					"type": "object",
@@ -50,7 +50,7 @@
 					"properties": {
 						"bin": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "Absolute path of the tailscale command. null: found on PATH, then the macOS app bundle." },
 						"servePort": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535, "default": null, "description": "The https port of `tailscale serve` that forwards to the hub. null: the same number as listen.port." },
-						"owner": { "type": ["string", "null"], "pattern": "^[^\\x00-\\x1f]{1,200}$", "default": null, "description": "Owner login. null: read from Tailscale. With publicHost, Tailscale is not asked at all." },
+						"owner": { "type": ["string", "null"], "pattern": "^[^\\x00-\\x1f]{1,200}$", "default": null, "description": "Owner login. null: read from Tailscale. With publicHost, the hub does not ask Tailscale for the owner or the name (pair --tailnet and doctor still ask whether it is running)." },
 						"publicHost": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9.-]{1,253}$", "default": null, "description": "This machine's MagicDNS name. null: read from Tailscale." }
 					}
 				}
@@ -62,7 +62,8 @@
 			"properties": {
 				"dir": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "The pairing store (pairing-store/1). null: <config dir>/pairing. To let omp-private-relay accept the same browsers, point its pairing.dir here and set its pairing.mode to shared." },
 				"cookieName": { "type": "string", "pattern": "^[A-Za-z0-9_]{1,40}$", "default": "omp_dashboard", "description": "The cookie that holds the browser's session id. omp-private-relay in shared mode must use the same name." },
-				"maxAgeDays": { "type": ["integer", "null"], "minimum": 1, "maximum": 3650, "default": 90, "description": "A paired browser is no longer paired this many days after it was paired (the cookie expires then too). null: never. omp-private-relay in shared mode does not apply this limit." }
+				"maxAgeDays": { "type": ["integer", "null"], "minimum": 1, "maximum": 3650, "default": 90, "description": "A paired browser is no longer paired this many days after it was paired (the cookie expires then too). null: never. omp-private-relay in shared mode does not apply this limit." },
+				"localMaxAgeDays": { "type": ["integer", "null"], "minimum": 1, "maximum": 3650, "default": 7, "description": "With auth.adapter both: a browser paired on the local address is no longer paired this many days after it was paired (never more than maxAgeDays; its cookie expires then too). The local cookie is not Secure and goes to every service on 127.0.0.1. null: the same limit as maxAgeDays. Not used with the other adapters." }
 			}
 		},
 		"omp": {
@@ -87,8 +88,9 @@
 				"hostPort": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 17797, "description": "The relay's host listener (where omp sessions connect). omp's collab.relayUrl must be ws://127.0.0.1:<this>." },
 				"guestPort": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 17796, "description": "The relay's guest listener (where browsers connect)." },
 				"checkDir": { "type": ["string", "null"], "pattern": "^/[^\\x00-\\x1f]*$", "default": null, "description": "The relay's check directory (relay-check/1). null: <config home>/omp-private-relay/check." },
-				"webUrl": { "type": ["string", "null"], "pattern": "^https?://[^\\x00-\\x20/?#]+$", "default": null, "description": "The address a browser uses for the relay's web client, and omp's collab.webUrl. null: http://127.0.0.1:<guestPort> with loopback-only, https://<name>:<servePort> with tailscale-serve." },
-				"servePort": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535, "default": null, "description": "With tailscale-serve: the https port of `tailscale serve` for the relay's guest listener. null: guestPort." }
+				"webUrl": { "type": ["string", "null"], "pattern": "^https?://[^\\x00-\\x20/?#]+$", "default": null, "description": "The address a browser uses for the relay's web client, and omp's collab.webUrl. null: http://127.0.0.1:<guestPort> with loopback-only, https://<name>:<servePort> with tailscale-serve. With both and relay.admits tailnet: the address for browsers that come through Tailscale Serve (null: https://<name>:<servePort>)." },
+				"servePort": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535, "default": null, "description": "With tailscale-serve, or both with relay.admits tailnet: the https port of `tailscale serve` for the relay's guest listener. null: guestPort." },
+				"admits": { "type": "string", "enum": ["local", "tailnet"], "default": "local", "description": "With auth.adapter both only: which browsers the running omp-private-relay admits. local: its sign-in is the one for direct browsers on this machine's own address (Open and Watch are offered to them only). tailnet: its sign-in is tailscale-serve, so browsers that come through Tailscale Serve (offered to them only). A relay admits one way; the other gets a message instead of a link." }
 			}
 		},
 		"start": {

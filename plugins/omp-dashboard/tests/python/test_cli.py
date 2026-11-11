@@ -43,7 +43,7 @@ class Basics(ScratchTestCase):
         self.assertEqual(cli(self.s, "config", "validate", "--replace").returncode, 2)
 
     def test_version_and_config_commands(self) -> None:
-        self.assertIn("omp-dashboard 0.1.1", cli(self.s, "--version").stdout)
+        self.assertIn("omp-dashboard 0.2.0", cli(self.s, "--version").stdout)
         self.assertEqual(cli(self.s, "config", "path").stdout.strip(), str(self.s.paths().config_file))
         self.assertIn("defaults are in use", cli(self.s, "config", "validate").stdout)
         shown = cli(self.s, "config", "show")

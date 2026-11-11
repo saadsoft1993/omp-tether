@@ -45,6 +45,47 @@ def _f(id_: str, level: str, message: str, fix: str | None = None) -> Finding:
     return Finding(id_, level, message, fix)
 
 
+def serve_funnel(text: str, port: int) -> bool:
+    """Whether `tailscale serve status --json` says Funnel (the public internet) is on for any route on `port`, whatever the route points at."""
+    try:
+        status = json.loads(text)
+    except ValueError:
+        return False
+    funnel = status.get("AllowFunnel") if isinstance(status, dict) else None
+    return isinstance(funnel, dict) and any(v is True and str(k).endswith(f":{port}") for k, v in funnel.items())
+
+
+def serve_verdict(config: Config, binary: str) -> tuple[str, str | bool | None, bool, str] | None:
+    """(state, detail, funnel, the route's target) from `tailscale serve status --json`, or None when it did not answer. See parse_serve_status."""
+    result = run_bounded([binary, "serve", "status", "--json"], 10.0, env=safe_env(), max_output=1024 * 1024)
+    if not result.ok:
+        return None
+    port, host = int(config.get("listen.port")), config.get("listen.host")
+    target = f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+    state, detail = parse_serve_status(result.stdout, config.serve_port, target)
+    return state, detail, serve_funnel(result.stdout, config.serve_port), target
+
+
+def serve_integrity(config: Config, env: Mapping[str, str]) -> tuple[bool, str]:
+    """(ok, what) for the route's integrity alone: false only for Funnel on, or a route that points elsewhere. Tailscale being off, the
+    tool missing or an absent route are availability, not integrity, and are ok here (`doctor` reports them as warnings)."""
+    configured = config.get("auth.tailscale.bin")
+    binary = find_tool("tailscale", configured, dict(env)) or (
+        TAILSCALE_APP if not configured and os.access(TAILSCALE_APP, os.X_OK) else None
+    )
+    if binary is None:
+        return True, "the tailscale command was not found: the route was not checked"
+    verdict = serve_verdict(config, binary)
+    if verdict is None:
+        return True, "tailscale serve status did not answer: the route was not checked"
+    state, detail, funnel, _ = verdict
+    if funnel:
+        return False, f"Funnel is switched on for port {config.serve_port}"
+    if state == "elsewhere":
+        return False, f"Serve port {config.serve_port} forwards to {one_line(str(detail), 80)}, not to this hub"
+    return True, f"route state: {state}"
+
+
 def parse_serve_status(text: str, port: int, target: str) -> tuple[str, str | bool | None]:
     """Reads `tailscale serve status --json`: is there a route from https://<this machine>:<port> to `target`, and is
     Funnel (the public internet) switched on for it? ('ok', funnel) | ('absent', None) | ('elsewhere', where) | ('unreadable', None)."""
@@ -66,6 +107,24 @@ def parse_serve_status(text: str, port: int, target: str) -> tuple[str, str | bo
             return "elsewhere", proxy
         return "ok", bool(isinstance(funnel, dict) and funnel.get(host_port) is True)
     return "absent", None
+
+
+def _probe_local_access(host: str, port: int) -> int | str:
+    """The status a direct, unpaired request for the sign-in's own gate gets (`GET /api/hub/about`: 401 once the sign-in has let it in), or why not."""
+    conn = http.client.HTTPConnection(host, port, timeout=2)
+    deadline = Deadline(2)
+    try:
+        connect_bounded(conn, host, port, deadline)
+        conn.request("GET", "/api/hub/about", headers={"Host": f"{'[' + host + ']' if ':' in host else host}:{port}"})
+        resp = conn.getresponse()
+        resp.read(1024)
+        deadline.check()
+        return resp.status
+    except (OSError, http.client.HTTPException):
+        return "no answer"
+    finally:
+        deadline.cancel()
+        conn.close()
 
 
 def _probe_hub(host: str, port: int) -> str | None:
@@ -169,9 +228,40 @@ def run_doctor(config: Config, env: Mapping[str, str], platform: Platform | None
             )
         )
     adapter = config.get("auth.adapter")
-    if adapter == "tailscale-serve":
-        out.extend(_tailscale(config, env, platform))
-    else:
+    if adapter == "both":
+        out.append(
+            _f(
+                "auth",
+                OK,
+                "sign-in: both. This machine's own address (loopback Host, the pairing cookie) and Tailscale Serve (the owner's login, "
+                "this machine's name and the cookie) are judged by their own rules",
+            )
+        )
+        # /healthz is liveness only and ignores the sign-in; ask a path the sign-in guards, with no cookie: 401 means it let a direct request in.
+        status = _probe_local_access(host, port) if answer is None else None
+        if answer is not None:
+            out.append(
+                _f(
+                    "access-local",
+                    WARN,
+                    f"local access is not available: no hub answers on {host}:{port}",
+                    "start it: omp-dashboard run (or omp-services, see the README)",
+                )
+            )
+        elif status == 401:
+            out.append(_f("access-local", OK, f"local access works: http://{host}:{port}/ (no Tailscale needed)"))
+        else:
+            out.append(
+                _f(
+                    "access-local",
+                    FAIL,
+                    f"the hub on {host}:{port} is alive but refuses a direct local request (answered {status}): it is running with another sign-in than the configuration says",
+                    "restart the hub so it reads auth.adapter: both",
+                )
+            )
+    if adapter in ("tailscale-serve", "both"):
+        out.extend(_tailscale(config, env, platform, soft=adapter == "both"))
+    elif adapter == "loopback-only":
         out.append(_f("auth", OK, "sign-in: loopback-only (the pairing cookie alone, on a loopback Host)"))
     # --- pairing ----------------------------------------------------------------------------------------------------
     app = HubApp(config, dict(env), platform)
@@ -188,7 +278,26 @@ def run_doctor(config: Config, env: Mapping[str, str], platform: Platform | None
             )
         )
     else:
-        out.append(_f("pairing", OK, f"{len(view.hashes)} paired browser(s) in {config.pairing_dir}"))
+        message = f"{len(view.hashes)} paired browser(s) in {config.pairing_dir}"
+        if config.get("auth.adapter") == "both":
+            ways = view.access or {}
+            local = sum(1 for h in view.hashes if ways.get(h) == "local")
+            tailnet = sum(1 for h in view.hashes if ways.get(h) == "tailnet")
+            unknown = len(view.hashes) - local - tailnet
+            message += f" ({local} local, {tailnet} tailnet, {unknown} without a recorded way in)"
+            if unknown:
+                out.append(
+                    _f(
+                        "pairing",
+                        WARN,
+                        message
+                        + ": with sign-in both a browser is let in only the way it was paired, so those are refused on both",
+                        "pair them again: omp-dashboard pair (local) or omp-dashboard pair --tailnet; `omp-dashboard devices` lists them",
+                    )
+                )
+                message = ""
+        if message:
+            out.append(_f("pairing", OK, message))
     # --- omp --------------------------------------------------------------------------------------------------------
     out.extend(_omp(app.omp, config, env))
     # --- control ----------------------------------------------------------------------------------------------------
@@ -207,7 +316,11 @@ def run_doctor(config: Config, env: Mapping[str, str], platform: Platform | None
     return out
 
 
-def _tailscale(config: Config, env: Mapping[str, str], platform: Platform) -> list[Finding]:
+def _tailscale(config: Config, env: Mapping[str, str], platform: Platform, soft: bool = False) -> list[Finding]:
+    """The tailnet side. With `soft` (sign-in `both`) a problem with it is a warning, because the local address works without it
+    and a doctor that fails for Tailscale being off would call a working hub broken; Funnel being on stays a failure."""
+    bad = WARN if soft else FAIL
+    gone = "the tailnet path answers 503" if soft else "every request gets 503"
     out: list[Finding] = []
     adapter = TailscaleServe(
         config.get("auth.tailscale.bin"),
@@ -229,21 +342,31 @@ def _tailscale(config: Config, env: Mapping[str, str], platform: Platform) -> li
             out.append(
                 _f(
                     "tailscale",
-                    FAIL,
-                    f"the tailscale command was not found (looked at {looked}), so this machine's owner and name are not known: every request gets 503",
+                    bad,
+                    f"the tailscale command was not found (looked at {looked}), so this machine's owner and name are not known: {gone}",
                     "set auth.tailscale.bin in the config file (or OMP_DASHBOARD_TAILSCALE_BIN) to the absolute path of the tailscale command, "
                     "for example /Applications/Tailscale.app/Contents/MacOS/Tailscale; or set auth.tailscale.owner and auth.tailscale.publicHost",
                 )
             )
+            if soft:
+                out.append(
+                    _f("serve-route", WARN, "the Serve route was not checked: the tailscale command was not found")
+                )
             return out
         out.append(
             _f(
                 "tailscale",
-                FAIL,
-                "this machine's Tailscale owner and name are not known: every request gets 503",
+                bad,
+                f"this machine's Tailscale owner and name are not known (is Tailscale running?): {gone}"
+                + ("; the local address is not affected" if soft else ""),
                 "start Tailscale, or set auth.tailscale.owner and auth.tailscale.publicHost",
             )
         )
+        # The identity is unknown, not the Serve configuration: a route that points elsewhere or Funnel being on can be seen without it.
+        if binary is not None:
+            out.extend(_serve_findings(config, binary))
+        elif soft:
+            out.append(_f("serve-route", WARN, "the Serve route was not checked: the tailscale command was not found"))
         return out
     out.append(_f("tailscale", OK, f"owner and machine name known ({len(names)} name(s))"))
     if binary is None:
@@ -256,28 +379,29 @@ def _tailscale(config: Config, env: Mapping[str, str], platform: Platform) -> li
             )
         )
         return out
-    result = run_bounded([binary, "serve", "status", "--json"], 10.0, env=safe_env(), max_output=1024 * 1024)
-    if not result.ok:
-        out.append(_f("serve-route", WARN, "`tailscale serve status` did not answer", None))
-        return out
-    port = int(config.get("listen.port"))
-    host = config.get("listen.host")
-    target = f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
-    state, detail = parse_serve_status(result.stdout, config.serve_port, target)
-    if state == "ok":
-        if detail:
-            out.append(
-                _f(
-                    "serve-route",
-                    FAIL,
-                    f"Funnel is switched on for port {config.serve_port}: the hub is open to the internet's requests (they are refused, but they should not arrive)",
-                    f"tailscale funnel --https={config.serve_port} off",
-                )
-            )
-        else:
-            out.append(
-                _f("serve-route", OK, f"Tailscale Serve forwards https port {config.serve_port} to the hub (no Funnel)")
-            )
+    out.extend(_serve_findings(config, binary))
+    return out
+
+
+def _serve_findings(config: Config, binary: str) -> list[Finding]:
+    """The Serve route and Funnel for the hub's port, from `tailscale serve status`. A route that points elsewhere and Funnel being on
+    are failures whatever else is true (sign-in, whether the identity is known, whether the Web route exists); only an absent route,
+    or a Tailscale that does not answer, is a warning."""
+    verdict = serve_verdict(config, binary)
+    if verdict is None:
+        return [_f("serve-route", WARN, "`tailscale serve status` did not answer", None)]
+    out: list[Finding] = []
+    state, detail, funnel, target = verdict
+    funnel_message = (
+        f"Funnel is switched on for port {config.serve_port}: the hub is open to the internet's requests (they are refused, but they should not arrive)",
+        f"tailscale funnel --https={config.serve_port} off",
+    )
+    if state == "ok" and funnel:
+        out.append(_f("serve-route", FAIL, *funnel_message))
+    elif state == "ok":
+        out.append(
+            _f("serve-route", OK, f"Tailscale Serve forwards https port {config.serve_port} to the hub (no Funnel)")
+        )
     elif state == "elsewhere":
         out.append(
             _f(
@@ -298,6 +422,8 @@ def _tailscale(config: Config, env: Mapping[str, str], platform: Platform) -> li
         )
     else:
         out.append(_f("serve-route", WARN, "`tailscale serve status` printed something unreadable"))
+    if funnel and state != "ok":  # Funnel is on for the port whether or not the Web route there is ours, or exists
+        out.append(_f("serve-funnel", FAIL, *funnel_message))
     return out
 
 
@@ -371,12 +497,29 @@ def _relay(config: Config, app: HubApp, platform: Platform, uid: int) -> list[Fi
         out.append(
             _f("relay", FAIL, str(exc), "start the relay (omp-private-relay run); check relay.checkDir and the ports")
         )
-    web, relay_url = app.web_url(), app.relay_url()
-    if web is None:
+    addresses = app.web_addresses()
+    relay_url = app.relay_url()
+    if not addresses:
         out.append(_f("relay-web", WARN, "the relay's web address is not known yet (Tailscale?)"))
         return out
-    # omp's own settings must point at the same relay, or sessions keep using the public one.
-    for key, want in (("collab.relayUrl", relay_url), ("collab.webUrl", web)):
+    admits = app.relay_admits()
+    if admits:
+        out.append(
+            _f(
+                "relay-admits",
+                OK,
+                f"relay.admits is {admits}: Open and Watch are offered to browsers "
+                + (
+                    "on this machine's own address only (the relay's auth must be token)"
+                    if admits == "local"
+                    else "through Tailscale Serve only (the relay's auth must be tailscale-serve)"
+                )
+                + "; the other way is told why there is no link",
+            )
+        )
+    # omp's own settings must point at the same relay, or sessions keep using the public one. With `both` and a relay for the
+    # local way, omp's web address may be any of this machine's loopback names.
+    for key, choices in (("collab.relayUrl", (relay_url,)), ("collab.webUrl", addresses)):
         binary = find_tool("omp", config.get("omp.bin"), app.env, "OMP_BIN")
         if binary is None:
             break
@@ -384,12 +527,13 @@ def _relay(config: Config, app: HubApp, platform: Platform, uid: int) -> list[Fi
             [binary, "config", "get", key], 10.0, env={k: v for k, v in app.env.items() if k != "BUN_BE_BUN"}
         )
         got = result.stdout.strip() if result.ok else ""
-        if got.rstrip("/").lower() != str(want).rstrip("/").lower():
+        if not any(got.rstrip("/").lower() == str(want).rstrip("/").lower() for want in choices):
+            want = choices[0]
             out.append(
                 _f(
                     f"omp-{key.split('.')[1]}",
                     WARN,
-                    f"omp's {key} is not {want}: sessions will not use this relay",
+                    f"omp's {key} is not {' or '.join(str(c) for c in choices)}: sessions will not use this relay",
                     f"omp config set {key} {want}",
                 )
             )

@@ -92,21 +92,13 @@ class Defaults(ConfigCase):
         )
         self.assertEqual(c.control_dir, self.scratch.root / "mine")
 
-    def test_no_default_names_a_person_a_host_a_workspace_or_a_fixed_port_in_use_elsewhere(self) -> None:
+    def test_no_default_names_a_host_a_home_directory_or_a_fixed_port_in_use_elsewhere(self) -> None:
         schema_text = json.dumps(
             {k: v for k, v in schema.load_schema("config-1").items() if k != "$id"}
         )  # $id is this repository's address
         text = json.dumps(DEFAULTS) + schema_text
-        for word in (
-            "sa" + "ad",
-            "enigma" + "tix",
-            "link" + "graph",
-            "search" + "atlas",
-            "tail" + "net",
-            ".ts" + ".net",
-            "/us" + "ers/",
-            "home" + "brew",
-        ):  # assembled: this file passes the publication check
+        # Names of people and organisations are kept out by the publication check, which reads them from a file outside the repository.
+        for word in (".ts.net", "/users/", "/home/", "homebrew"):
             self.assertNotIn(word, text.lower(), word)
         ports = {DEFAULTS["listen"]["port"], DEFAULTS["relay"]["hostPort"], DEFAULTS["relay"]["guestPort"]}
         live = (
@@ -247,6 +239,7 @@ class Environment(ConfigCase):
             "OMP_DASHBOARD_TAILSCALE_HOST": ("box.example.test", "box.example.test"),
             "OMP_DASHBOARD_PAIRING_DIR": ("/p", "/p"),
             "OMP_DASHBOARD_PAIRING_MAX_AGE_DAYS": ("30", 30),
+            "OMP_DASHBOARD_PAIRING_LOCAL_MAX_AGE_DAYS": ("3", 3),
             "OMP_DASHBOARD_COOKIE_NAME": ("cookie_x", "cookie_x"),
             "OMP_DASHBOARD_OMP_BIN": ("/bin/omp", "/bin/omp"),
             "OMP_DASHBOARD_CONTROL_DIR": ("/c", "/c"),
@@ -256,6 +249,7 @@ class Environment(ConfigCase):
             "OMP_DASHBOARD_RELAY_CHECK_DIR": ("/k", "/k"),
             "OMP_DASHBOARD_RELAY_WEB_URL": ("http://127.0.0.1:7002", "http://127.0.0.1:7002"),
             "OMP_DASHBOARD_RELAY_SERVE_PORT": ("7003", 7003),
+            "OMP_DASHBOARD_RELAY_ADMITS": ("tailnet", "tailnet"),
             "OMP_DASHBOARD_START_BACKEND": ("tmux", "tmux"),
             "OMP_DASHBOARD_START_ROOTS": ("/r1:/r2", ["/r1", "/r2"]),
             "OMP_DASHBOARD_HERDR_BIN": ("/h", "/h"),

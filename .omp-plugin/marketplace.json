@@ -36,7 +36,7 @@
 		{
 			"name": "omp-dashboard",
 			"source": "./plugins/omp-dashboard",
-			"version": "0.1.1",
+			"version": "0.2.0",
 			"description": "A local dashboard for your own omp sessions: list, open (through your private relay), stop, rename, kill and start them, with per-browser pairing. Does nothing until you run it.",
 			"license": "MIT",
 			"category": "productivity",

@@ -88,7 +88,7 @@
 			"note": "The patch applies unchanged to v18.18.0 and v18.18.3; the pinned build is from v18.18.3. A new omp minor needs its own patch file and build."
 		},
 		"omp-dashboard": {
-			"version": "0.1.1",
+			"version": "0.2.0",
 			"protocols": ["pairing-store/1", "session-control/1", "relay-check/1", "services/1", "health/1", "config/1"],
 			"platforms": ["darwin", "linux"],
 			"python": ">=3.10",

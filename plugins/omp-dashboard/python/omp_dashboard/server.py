@@ -27,7 +27,7 @@ from urllib.parse import unquote
 from . import __version__, hostplat, relay
 from .alerts import Alerts
 from .audit import audit
-from .auth import Denied, build_adapter, host_header
+from .auth import Denied, build_adapter, host_header, proxy_sign
 from .config import Config
 from .control import ControlDir, ControlError, control, has_control
 from .hostplat import Platform
@@ -81,6 +81,18 @@ CSP = (
     "form-action 'none'"
 )
 UI_UNAVAILABLE = "the dashboard page is missing or damaged; run `omp-dashboard doctor`"
+LOOPBACK_NAMES = ("127.0.0.1", "localhost")  # the names a browser may open this machine's relay at, with sign-in both
+RELAY_OTHER_PATH = {
+    "local": "The relay admits only browsers on this machine's own address (its auth is token), so Open and Watch are offered there only. "
+    "Open the dashboard at http://127.0.0.1:<port>/ on this machine, or run the relay with auth tailscale-serve and set relay.admits to tailnet.",
+    "tailnet": "The relay admits only browsers that come through Tailscale Serve (its auth is tailscale-serve), so Open and Watch are offered there only. "
+    "Open the dashboard through Serve, or run the relay with auth token and set relay.admits to local.",
+}
+RELAY_BAD_ADDRESS = (
+    "Open and Watch are offered only at 127.0.0.1 and localhost on the hub's own port: at another name or port the relay's address "
+    "would be the browser machine's, not the hub machine's. A forward that keeps the hub's port number cannot be told apart from a "
+    "direct request, so there the link is offered and may name the wrong machine: forward the relay's guest port too, or do not use Open and Watch."
+)
 
 
 def clean_target(target: str) -> tuple[str, str] | None:
@@ -171,6 +183,7 @@ class HubApp:
             config.get("pairing.cookieName"),
             on_refusal=self._refusal,
             max_age_days=config.get("pairing.maxAgeDays"),
+            local_max_age_days=config.get("pairing.localMaxAgeDays") if self.adapter.name == "both" else None,
         )
         self.omp = Omp(lambda: find_tool("omp", config.get("omp.bin"), self.env, "OMP_BIN"), self.env)
         self.control = ControlDir(config.control_dir)
@@ -216,23 +229,46 @@ class HubApp:
         """The relay's host listener as omp sessions use it (collab.relayUrl), or None when the relay is off."""
         return f"ws://127.0.0.1:{self.config.get('relay.hostPort')}" if self.relay_enabled else None
 
+    def relay_admits(self) -> str | None:
+        """With `both`: "local" or "tailnet", the one way the running relay admits browsers (relay.admits); else None."""
+        return str(self.config.get("relay.admits")) if self.adapter.name == "both" else None
+
     def web_url(self) -> str | None:
-        """The relay's web client as a browser reaches it (collab.webUrl), or None while it is not known."""
+        """The relay's web client as a browser reaches it (collab.webUrl), or None while it is not known.
+
+        With `both` it is the address of the one way the relay admits: this machine's own address, or the Serve one."""
         if not self.relay_enabled:
             return None
+        guest = int(self.config.get("relay.guestPort"))
+        if self.relay_admits() == "local":
+            return f"http://127.0.0.1:{guest}"
         configured = self.config.get("relay.webUrl")
         if configured:
             return str(configured)
-        guest = int(self.config.get("relay.guestPort"))
-        if self.adapter.name == "tailscale-serve":
+        if self.adapter.name in ("tailscale-serve", "both"):
             return self.adapter.web_origin(int(self.config.get("relay.servePort") or guest))
         return f"http://127.0.0.1:{guest}"
 
+    def web_addresses(self) -> tuple[str, ...]:
+        """Every web address a link of ours may carry: one, or with `both` and a relay for the local way, the loopback names of this machine."""
+        if self.relay_admits() == "local" and self.relay_enabled:
+            guest = int(self.config.get("relay.guestPort"))
+            return tuple(f"http://{name}:{guest}" for name in LOOPBACK_NAMES)
+        url = self.web_url()
+        return (url,) if url else ()
+
+    def local_open_address(self, host_header_value: str | None) -> str | None:
+        """Where a browser that reached the hub at this `Host` opens the relay: the same host name, at the relay's guest port. Only for
+        127.0.0.1 and localhost at this hub's own port: another name (`[::1]`, an allowedHosts entry for a forward) is not one this
+        relay is known to listen on, and the address would be the browser machine's, not this one's. None then."""
+        name, sep, port = (host_header_value or "").strip().lower().rpartition(":")
+        if not sep or name not in LOOPBACK_NAMES or port != str(self.config.get("listen.port")):
+            return None
+        return f"http://{name}:{int(self.config.get('relay.guestPort'))}"
+
     def sessions_url(self) -> str | None:
         """Where an alert points: the dashboard's Sessions page, only when a phone could reach it."""
-        if self.adapter.name != "tailscale-serve":
-            return None
-        url = self.adapter.public_url()
+        url = self.adapter.tailnet_url()
         return f"{url}#/sessions" if url else None
 
     def machine(self) -> str:
@@ -420,7 +456,10 @@ class Handler(BaseHTTPRequestHandler):
     # --- gates ------------------------------------------------------------------------------------------------------
 
     def paired_device(self) -> str | None:
-        return self.app.pairing.paired_device(self.headers.get("Cookie"))
+        """The paired browser behind this request's cookie, or None. With `both` the device must have been paired the way
+        this request came (local or through Serve): a cookie of the other way is not a paired browser here."""
+        access = self.app.adapter.access(self.headers) if self.app.adapter.name == "both" else None
+        return self.app.pairing.paired_device(self.headers.get("Cookie"), access)
 
     def same_origin_post(self) -> str | None:
         """None when this POST came from the dashboard page itself, else why not.
@@ -429,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
         must be this hub's own origin, which every fetch POST from the page carries."""
         if self.headers.get("X-Omp-Dashboard") != "1":
             return "missing X-Omp-Dashboard header"
-        if self.headers.get("Origin") not in self.app.adapter.origins():
+        if self.headers.get("Origin") not in self.app.adapter.origins(self.headers):
             return "wrong Origin"
         return None
 
@@ -458,10 +497,7 @@ class Handler(BaseHTTPRequestHandler):
         """Liveness for a heartbeat on this machine: only a direct loopback client with this hub's own port gets it."""
         port = self.app.config.get("listen.port")
         direct = host_header(self.headers) in {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
-        proxied = any(
-            self.headers.get(h) is not None
-            for h in ("Origin", "Tailscale-User-Login", "Tailscale-Funnel-Request", "X-Forwarded-For", "Forwarded")
-        )
+        proxied = proxy_sign(self.headers) is not None or self.headers.get("Origin") is not None
         if self.command == "POST" or not direct or proxied:
             return self.reply(403, {"error": FIXED_ERRORS[403]})
         return self.reply(200, {"ok": True, "updatedAt": int(time.time())})
@@ -539,7 +575,7 @@ class Handler(BaseHTTPRequestHandler):
         except ControlError as exc:
             regs, control_problem = [], str(exc)
         places = app.places(hosts)
-        app.classifier.annotate(hosts, app.web_url(), app.relay_url(), app.relay_enabled)
+        app.classifier.annotate(hosts, app.web_addresses(), app.relay_url(), app.relay_enabled)
         for h in hosts:
             h["control"] = has_control(regs, h.get("sessionId"), h.get("pid"))
             h["place"] = places.get(h.get("sessionId"))
@@ -647,7 +683,8 @@ class Handler(BaseHTTPRequestHandler):
         if not known and slot is None:
             app.audit("pair", None, "rate_limited", None)
             return self.reply(429, {"error": "too many failed pairing attempts; try again in a few minutes"})
-        session = app.pairing.writer.redeem(token, self.headers.get("User-Agent"))
+        access = app.adapter.access(self.headers)
+        session = app.pairing.writer.redeem(token, self.headers.get("User-Agent"), access)
         if session is None:
             if known:
                 app.pair_budget.reserve()  # lost a race with another redeem: that was a failure after all
@@ -657,8 +694,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         if slot is not None:
             app.pair_budget.release(slot)
-        secure = "; Secure" if app.adapter.secure_cookie() else ""
-        days = app.config.get("pairing.maxAgeDays")
+        secure = "; Secure" if app.adapter.secure_cookie(self.headers) else ""
+        days = app.pairing.max_age_days_for(access if app.adapter.name == "both" else None)
         max_age = 31536000 if days is None else int(days) * 86400
         cookie = f"{app.config.get('pairing.cookieName')}={session}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict{secure}"
         app.audit("pair", None, "paired", cookie_hash(session)[:8])
@@ -673,13 +710,36 @@ class Handler(BaseHTTPRequestHandler):
         if not app.relay_enabled:
             app.audit("link", target, "refused:relay_off", browser)
             return self.reply(409, {"error": "no private relay is configured (relay.enabled)", "code": "relay_off"})
-        web_url, relay_url = app.web_url(), app.relay_url()
-        if not web_url or not relay_url:
+        addresses = app.web_addresses()
+        relay_url = app.relay_url()
+        open_at = None
+        if app.adapter.name == "both":
+            # The bundled relay admits one way (token auth: direct browsers; tailscale-serve auth: browsers through Serve), so a link is
+            # offered only to browsers of that way, and says so to the others instead of handing out a link that would be refused.
+            access, admits = app.adapter.access(self.headers), app.relay_admits()
+            if access != admits:
+                app.audit("link", target, "refused:relay_other_path", browser)
+                return self.reply(409, {"error": RELAY_OTHER_PATH[admits or "local"], "code": "relay_other_path"})
+            if access == "local":
+                open_at = app.local_open_address(host_header(self.headers))
+                if open_at is None:
+                    app.audit("link", target, "refused:relay_address", browser)
+                    return self.reply(409, {"error": RELAY_BAD_ADDRESS, "code": "relay_address"})
+            else:
+                open_at = app.web_url()
+        if not addresses or not relay_url or (app.adapter.name == "both" and not open_at):
             app.audit("link", target, "refused:no_address", browser)
             return self.reply(503, {"error": "the relay's web address is not known yet (is Tailscale running?)"})
         instance, view = body.get("instanceId"), bool(body.get("view"))
         try:
-            link = session_link(app.omp, instance if isinstance(instance, str) else "", view, web_url, relay_url)
+            link = session_link(
+                app.omp,
+                instance if isinstance(instance, str) else "",
+                view,
+                addresses,
+                relay_url,
+                open_at=open_at,
+            )
         except PublicRelayError as exc:
             app.audit("link", target, "refused:public_relay", browser)
             return self.reply(409, {"error": str(exc), "relay": "public"})

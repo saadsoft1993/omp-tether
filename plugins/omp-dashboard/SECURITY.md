@@ -4,7 +4,7 @@
 
 Please report it privately, not in a public issue: use GitHub's **Report a vulnerability** button on the repository's Security tab
 (private vulnerability reporting). Include the omp version, your operating system, the plugin version, which sign-in adapter you use
-(`loopback-only` or `tailscale-serve`), and the smallest steps that reproduce the problem. Please do not attach real cookies, pairing links,
+(`loopback-only`, `tailscale-serve` or `both`), and the smallest steps that reproduce the problem. Please do not attach real cookies, pairing links,
 room links, ntfy topics or the contents of your pairing store.
 
 This is a one-person project. I will read every report and answer as soon as I can; I cannot promise a fixed response time. Please give me

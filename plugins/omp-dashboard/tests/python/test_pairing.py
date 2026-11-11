@@ -264,6 +264,20 @@ class WithTheRelaysImplementation(Scratch):
         token2 = self.ts("create-token", str(self.dir))["token"]
         self.assertTrue(PairingWriter(self.dir).redeem(token2, "y"))
 
+    def test_the_way_in_recorded_with_a_device_changes_nothing_for_the_relay_and_survives_its_writes(self) -> None:
+        writer = PairingWriter(self.dir)
+        local = writer.redeem(writer.create_token(), "Local", "local")
+        tailnet = writer.redeem(writer.create_token(), "Tailnet", "tailnet")
+        for session in (local, tailnet):  # the relay's reader goes by the key only
+            self.assertTrue(self.ts("check", str(self.dir), "omp_dashboard", f"omp_dashboard={session}")["paired"])
+        # the relay's writer redeems another token and revokes a third device: the others keep their field
+        other = self.ts("redeem", str(self.dir), writer.create_token(), "Relay")["session"]
+        self.assertEqual(self.ts("revoke", str(self.dir), cookie_hash(other)[:8])["revoked"], 1)
+        ways = {d.label: d.access for d in PairingWriter(self.dir).devices()}
+        self.assertEqual(ways, {"Local": "local", "Tailnet": "tailnet"})
+        with self.assertRaises(ValueError):
+            writer.redeem(writer.create_token(), "x", "everywhere")
+
 
 if __name__ == "__main__":
     unittest.main()

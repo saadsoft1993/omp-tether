@@ -76,7 +76,7 @@ export interface HubAlerts {
 
 export interface HubAbout {
 	version: string;
-	adapter: "loopback-only" | "tailscale-serve";
+	adapter: "loopback-only" | "tailscale-serve" | "both";
 	start: "off" | "herdr" | "tmux";
 	relay: boolean;
 	/** Where a stock `omp stats` is reachable from this browser (stats.url), or null. */

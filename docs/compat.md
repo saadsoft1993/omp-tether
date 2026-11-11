@@ -27,7 +27,7 @@ built with the same Bun gives the same content hash, which a release job compare
 
 ### `omp-dashboard`
 
-Tested with omp 18.18.0 and 18.18.3. It uses omp through its command line only (`omp --version`, `omp collab list --json` and `omp collab link --json` at JSON version 1, `omp config get`), plus `session-control/1` for Stop and Rename and `relay-check/1` for the relay. `doctor` fails on an omp older than 18.18.0 and warns on a version not listed in `ompTested`. The dashboard page is built with Bun and committed, pinned by hashes (`plugins/omp-dashboard/ui-build.json`).
+Tested with omp 18.18.0 and 18.18.3. It uses omp through its command line only (`omp --version`, `omp collab list --json` and `omp collab link --json` at JSON version 1, `omp config get`), plus `session-control/1` for Stop and Rename and `relay-check/1` for the relay. `doctor` fails on an omp older than 18.18.0 and warns on a version not listed in `ompTested`. The dashboard page is built with Bun and committed, pinned by hashes (`plugins/omp-dashboard/ui-build.json`). Sign-in adapters (`auth.adapter`): `loopback-only`, `tailscale-serve` and, from 0.2.0, `both` (the local address and Tailscale Serve at once); config schema 1 is unchanged in shape, `both` is one more allowed value.
 
 ## Bun
 
@@ -40,7 +40,7 @@ Ubuntu. macOS's own `/usr/bin/python3` is 3.9 and is refused with a message that
 
 ## Platforms
 
-macOS and Linux. Not Windows: omp uses named pipes there, and this repository's plugins use Unix sockets. Listener ownership checks use `lsof` on macOS and `/proc/net/tcp` (or `ss`) on Linux. Tailscale Serve's header behaviour was tested against a real Serve on macOS (Tailscale 1.104.5: a caller-sent `Tailscale-User-Login` is replaced, a caller-sent Funnel header is removed); not on Linux, and not with a real non-owner tailnet identity.
+macOS and Linux. Not Windows: omp uses named pipes there, and this repository's plugins use Unix sockets. Listener ownership checks use `lsof` on macOS and `/proc/net/tcp` (or `ss`) on Linux. Tailscale Serve's header behaviour was tested against a real Serve on macOS (Tailscale 1.104.5: a caller-sent `Tailscale-User-Login` is replaced, a caller-sent Funnel header is removed); the `both` adapter was also run against a real Serve route on macOS (Tailscale 1.104.4) with the local address, the tailnet name and Tailscale stopped. Not tested on Linux, and not with a real non-owner tailnet identity.
 
 ## Protocols
 

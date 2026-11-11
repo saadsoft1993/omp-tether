@@ -1,18 +1,22 @@
 """Who may even ask: the owner-login adapters.
 
-An adapter answers four questions for the hub, and the pairing cookie is checked after it, always:
+An adapter answers these questions for the hub, and the pairing cookie is checked after it, always:
 
     check_bind(host)       may the hub listen on this address? (loopback only, for every adapter)
+    access(headers)        which way did this request come, "local" (direct, on loopback) or "tailnet" (through a proxy)?
     check(headers)         does this request come from the right place? None, or a Denied(status, message)
-    origins()              the Origin values a browser's POST may carry
-    public_url()           where a browser opens the dashboard (pairing links, alert clicks), or None while unknown
+    origins(headers)       the Origin values a browser's POST by that way may carry
+    secure_cookie(headers) whether the pairing cookie for a browser that came that way is marked Secure
+    public_url()           where a browser opens the dashboard (pairing links), or None while unknown
+    tailnet_url()          where a browser on the tailnet opens it (alert clicks), or None when there is no such way or it is unknown
 
 `loopback-only` (the default): the request must name a loopback address as its Host and carry no sign of a proxy; the
 pairing cookie alone is the credential. `tailscale-serve`: the request must come through Tailscale Serve (which sets
 Tailscale-User-Login to the caller's login, replacing anything the caller sent, and passes the caller's Host through),
 the login must be this machine's owner, the Host must name this machine, and a request through Funnel (the internet) or
-from a tagged device (no login) is refused. Neither adapter stops another process on this machine that connects to the
-port and writes the headers itself: the paired-browser cookie does that.
+from a tagged device (no login) is refused. `both`: every request is judged by exactly one of those two rule sets: by
+tailscale-serve's when it carries any sign of a proxy, by loopback-only's when it carries none. Neither adapter stops
+another process on this machine that connects to the port and writes the headers itself: the paired-browser cookie does that.
 """
 
 from __future__ import annotations
@@ -32,13 +36,19 @@ from .util import DashboardError, RunResult, run_bounded, safe_env
 IDENTITY_TTL_S = 60.0
 IDENTITY_RETRY_S = 10.0  # while Tailscale is unknown, do not run `tailscale status` on every request
 TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
-# Headers that say a proxy sits in front of the hub. loopback-only never accepts them.
+# What says a proxy sits in front of the hub: every `Tailscale-*` and `X-Forwarded-*` header, and these. Looked for by the names
+# the request carries, in any case, so that a header Serve or another proxy adds later is a sign too. A request with any of them
+# is never judged as a direct local one.
+PROXY_PREFIXES = ("tailscale-", "x-forwarded-")
+PROXY_NAMES = ("forwarded", "via", "x-real-ip")
+# What can be asked for by name when a headers object cannot be listed.
 PROXY_HEADERS = (
     "Tailscale-User-Login",
     "Tailscale-Funnel-Request",
     "X-Forwarded-For",
     "X-Forwarded-Host",
     "Forwarded",
+    "Via",
     "X-Real-Ip",
 )
 
@@ -51,6 +61,18 @@ class Denied:
 
 class Headers(Protocol):
     def get(self, name: str, default: Any = None) -> Any: ...
+
+
+def proxy_sign(headers: Any) -> str | None:
+    """The name of the first header that shows a proxy in front of the hub, or None. See PROXY_PREFIXES and PROXY_NAMES."""
+    names = getattr(headers, "keys", None)
+    if names is None:
+        return next((h for h in PROXY_HEADERS if headers.get(h) is not None), None)
+    for name in names():
+        low = str(name).lower()
+        if low.startswith(PROXY_PREFIXES) or low in PROXY_NAMES:
+            return str(name)
+    return None
 
 
 def loopback_address(host: str) -> bool:
@@ -100,23 +122,29 @@ class LoopbackOnly:
     def check_bind(self, host: str) -> None:
         check_loopback_bind(host, self.name)
 
+    def access(self, headers: Headers) -> str:
+        return "local"
+
     def check(self, headers: Headers) -> Denied | None:
         if repeated_header(headers):
             return Denied(403, "a header that must appear once appeared more than once")
-        if any(headers.get(h) is not None for h in PROXY_HEADERS):
+        if proxy_sign(headers):
             return Denied(403, "this hub is set to loopback-only sign-in, which does not accept proxied requests")
         if host_header(headers) not in self.hosts:
             return Denied(403, "this hub answers only requests addressed to its own loopback address")
         return None
 
-    def origins(self) -> set[str]:
+    def origins(self, headers: Headers | None = None) -> set[str]:
         return {f"http://{h}" for h in self.hosts}
 
     def public_url(self) -> str | None:
         host = f"[{self.host}]" if ":" in self.host else self.host
         return f"http://{host}:{self.port}/"
 
-    def secure_cookie(self) -> bool:
+    def tailnet_url(self) -> str | None:
+        return None
+
+    def secure_cookie(self, headers: Headers | None = None) -> bool:
         return False
 
 
@@ -170,6 +198,24 @@ class TailscaleServe:
             return set(), None
         return {n.lower() for n in names}, login if isinstance(login, str) and login else None
 
+    def backend_state(self) -> str:
+        """Whether Tailscale is up, asked now and never cached: the `BackendState` of `tailscale status --json` ("Running", "Stopped",
+        "NeedsLogin", ...), "not-found" when there is no tailscale command, "unknown" when it does not answer in time or prints nothing
+        usable. Identity (the owner and the machine's names) is a different question: it can be configured, or cached, while Tailscale is off."""
+        binary = find_tool("tailscale", self.bin_path, self.env)
+        if binary is None and not self.bin_path and os.access(TAILSCALE_APP, os.X_OK):
+            binary = TAILSCALE_APP
+        if binary is None:
+            return "not-found"
+        result = self.run([binary, "status", "--json"], 5.0, env=safe_env(), max_output=2 * 1024 * 1024)
+        if not result.ok or result.truncated:
+            return "unknown"
+        try:
+            state = json.loads(result.stdout).get("BackendState")
+        except (ValueError, AttributeError):
+            return "unknown"
+        return state if isinstance(state, str) and state.isalnum() else "unknown"
+
     def identity(self) -> tuple[set[str], str | None]:
         """Names and owner, cached; one caller refreshes while the rest keep the cached answer. Configured values win;
         with both set, Tailscale is not asked at all."""
@@ -198,6 +244,9 @@ class TailscaleServe:
 
     # --- the adapter -----------------------------------------------------------------------------------------------
 
+    def access(self, headers: Headers) -> str:
+        return "tailnet"
+
     def check(self, headers: Headers) -> Denied | None:
         if repeated_header(headers):
             return Denied(403, "a header that must appear once appeared more than once")
@@ -221,7 +270,7 @@ class TailscaleServe:
         names, _ = self.identity()
         return max(names, key=len) if names else None
 
-    def origins(self) -> set[str]:
+    def origins(self, headers: Headers | None = None) -> set[str]:
         names, _ = self.identity()
         origins = {f"https://{n}:{self.serve_port}" for n in names}
         if self.serve_port == 443:
@@ -234,7 +283,10 @@ class TailscaleServe:
             return None
         return f"https://{name}/" if self.serve_port == 443 else f"https://{name}:{self.serve_port}/"
 
-    def secure_cookie(self) -> bool:
+    def tailnet_url(self) -> str | None:
+        return self.public_url()
+
+    def secure_cookie(self, headers: Headers | None = None) -> bool:
         return True
 
     def web_origin(self, port: int) -> str | None:
@@ -245,16 +297,69 @@ class TailscaleServe:
         return f"https://{name}" if port == 443 else f"https://{name}:{port}"
 
 
-def build_adapter(config: Any, env: Mapping[str, str] | None = None) -> LoopbackOnly | TailscaleServe:
+class Both:
+    """`loopback-only` and `tailscale-serve` at once, each request judged by exactly one of them.
+
+    A request that carries any sign of a proxy (see `proxy_sign`) is judged by tailscale-serve's rules and only by them: the
+    owner's login, this machine's name and Serve's port, no Funnel, no tagged device. A request that carries none is judged
+    by loopback-only's rules and only by them: a loopback Host of this hub (or one in allowedHosts). So a request that looks
+    direct but carries one forged Tailscale header is a proxied one and needs the owner's login, and a request with no sign
+    of a proxy can never use the tailnet rules, whatever Host it names. What follows a request (the Origin its POSTs may
+    carry, the Secure flag of its cookie) follows the same choice. The tailnet side answers 503 while the owner and the machine's
+    names are unknown (a configured or recently looked-up identity is still used); whether Tailscale is running is asked
+    separately (`TailscaleServe.backend_state`). The local side is not affected by either.
+    """
+
+    name = "both"
+
+    def __init__(self, local: LoopbackOnly, tailnet: TailscaleServe):
+        self.local = local
+        self.tailnet = tailnet
+
+    def check_bind(self, host: str) -> None:
+        check_loopback_bind(host, self.name)
+
+    def access(self, headers: Headers) -> str:
+        return "tailnet" if proxy_sign(headers) else "local"
+
+    def _by(self, headers: Headers) -> LoopbackOnly | TailscaleServe:
+        return self.tailnet if self.access(headers) == "tailnet" else self.local
+
+    def check(self, headers: Headers) -> Denied | None:
+        return self._by(headers).check(headers)
+
+    def origins(self, headers: Headers) -> set[str]:
+        return self._by(headers).origins()
+
+    def secure_cookie(self, headers: Headers) -> bool:
+        return self._by(headers).secure_cookie()
+
+    def public_url(self) -> str | None:
+        return self.local.public_url()
+
+    def tailnet_url(self) -> str | None:
+        return self.tailnet.public_url()
+
+    def backend_state(self) -> str:
+        return self.tailnet.backend_state()
+
+    def web_origin(self, port: int) -> str | None:
+        return self.tailnet.web_origin(port)
+
+
+def build_adapter(config: Any, env: Mapping[str, str] | None = None) -> LoopbackOnly | TailscaleServe | Both:
     """The adapter the configuration names."""
     host = config.get("listen.host")
     port = config.get("listen.port")
-    if config.get("auth.adapter") == "tailscale-serve":
-        return TailscaleServe(
-            config.get("auth.tailscale.bin"),
-            config.serve_port,
-            config.get("auth.tailscale.owner"),
-            config.get("auth.tailscale.publicHost"),
-            env=env,
-        )
-    return LoopbackOnly(host, port, config.get("auth.loopbackOnly.allowedHosts"))
+    adapter = config.get("auth.adapter")
+    local = LoopbackOnly(host, port, config.get("auth.loopbackOnly.allowedHosts"))
+    if adapter == "loopback-only":
+        return local
+    tailnet = TailscaleServe(
+        config.get("auth.tailscale.bin"),
+        config.serve_port,
+        config.get("auth.tailscale.owner"),
+        config.get("auth.tailscale.publicHost"),
+        env=env,
+    )
+    return tailnet if adapter == "tailscale-serve" else Both(local, tailnet)

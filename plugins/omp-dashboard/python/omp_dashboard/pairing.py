@@ -36,6 +36,10 @@ LOCK_FILE = ".lock"
 LOCK_WAIT_S = 5.0
 ANCESTRY_TTL_S = 5.0
 HASH_RE = re.compile(r"[0-9a-f]{64}\Z")
+ACCESS_KINDS = (
+    "local",
+    "tailnet",
+)  # how a device was paired; an optional field of its record (pairing-store/1 readers ignore it)
 PREFIX_RE = re.compile(r"[0-9a-f]{4,64}\Z")
 
 # Machine-readable reasons a store is refused (specification section 4); the last one is this plugin's addition: the
@@ -123,6 +127,7 @@ class StoreView:
     hashes: frozenset[str]
     refusal: str | None
     paired_at: dict[str, int] | None = None  # hash -> seconds since the epoch, for the age limit
+    access: dict[str, str] | None = None  # hash -> "local" or "tailnet", for the devices that have a recorded way in
 
 
 _NOBODY: frozenset[str] = frozenset()
@@ -190,24 +195,32 @@ class PairingReader:
             if not isinstance(parsed, dict):
                 return self._refuse("store-not-object")
             ages: dict[str, int] = {}
+            ways: dict[str, str] = {}
             for digest, value in parsed.items():
-                stamp = value.get("paired_at") if isinstance(value, dict) else None
-                if HASH_RE.match(digest) and isinstance(stamp, int | float) and not isinstance(stamp, bool):
+                if not HASH_RE.match(digest) or not isinstance(value, dict):
+                    continue
+                stamp = value.get("paired_at")
+                if isinstance(stamp, int | float) and not isinstance(stamp, bool):
                     ages[digest] = int(stamp)
-            view = StoreView(frozenset(k for k in parsed if HASH_RE.match(k)), None, ages)
+                if value.get("access") in ACCESS_KINDS:
+                    ways[digest] = value["access"]
+            view = StoreView(frozenset(k for k in parsed if HASH_RE.match(k)), None, ages, ways)
             self._cache = (fingerprint, view)
             return view
         finally:
             os.close(fd)
 
-    def match(self, cookie_header: str | None, name: str) -> str | None:
-        """The hash of the first cookie named `name` whose value is paired, or None. Every cookie of that name is tried."""
-        hashes = self.read().hashes
-        if not hashes:
+    def match(self, cookie_header: str | None, name: str, access: str | None = None) -> str | None:
+        """The hash of the first cookie named `name` whose value is paired, or None. Every cookie of that name is tried.
+
+        With `access` ("local" or "tailnet") only a device that was paired that way counts; a device with no recorded way in
+        counts for none. A cookie of another way in is skipped, not fatal: a valid one after it is still found."""
+        view = self.read()
+        if not view.hashes:
             return None
         for value in cookie_values(cookie_header, name):
             digest = cookie_hash(value)
-            if digest in hashes:
+            if digest in view.hashes and (access is None or (view.access or {}).get(digest) == access):
                 return digest
         return None
 
@@ -223,6 +236,7 @@ class DeviceInfo:
     hash: str
     label: str
     paired_at: int
+    access: str | None = None  # "local" or "tailnet": the way the browser was paired; None when none was recorded
 
 
 class PairingWriter:
@@ -311,8 +325,11 @@ class PairingWriter:
             self._save(PENDING_FILE, pending)
         return token
 
-    def redeem(self, token: object, label: str | None) -> str | None:
-        """Spends a token. Returns the new browser's session id (its cookie value), or None for an unknown or expired one."""
+    def redeem(self, token: object, label: str | None, access: str | None = None) -> str | None:
+        """Spends a token. Returns the new browser's session id (its cookie value), or None for an unknown or expired one.
+        `access` ("local" or "tailnet") is recorded with the device: the way the browser was paired (see PairingStore.paired_device)."""
+        if access is not None and access not in ACCESS_KINDS:
+            raise ValueError(f"unknown way in: {access!r}")
         if not isinstance(token, str) or token == "" or len(token) > COOKIE_VALUE_MAX:
             return None
         with self._locked():
@@ -331,7 +348,10 @@ class PairingWriter:
                 return None
             session = secrets.token_urlsafe(32)
             devices = self._load(DEVICES_FILE)
-            devices[cookie_hash(session)] = {"label": clean_label(label), "paired_at": int(now)}
+            record: dict[str, object] = {"label": clean_label(label), "paired_at": int(now)}
+            if access is not None:
+                record["access"] = access
+            devices[cookie_hash(session)] = record
             self._save(DEVICES_FILE, devices)
             return session
 
@@ -380,6 +400,7 @@ class PairingWriter:
                     hash=digest,
                     label=clean_label(info.get("label") if isinstance(info.get("label"), str) else None),
                     paired_at=int(paired) if isinstance(paired, int | float) and not isinstance(paired, bool) else 0,
+                    access=info.get("access") if info.get("access") in ACCESS_KINDS else None,
                 )
             )
         return sorted(out, key=lambda d: d.paired_at)
@@ -459,11 +480,13 @@ class PairingStore:
         cookie_name: str,
         on_refusal: Callable[[str], None] | None = None,
         max_age_days: int | None = None,
+        local_max_age_days: int | None = None,
         now: Callable[[], float] = time.time,
     ):
         self.dir = Path(directory)
         self.cookie_name = cookie_name
         self.max_age_days = max_age_days
+        self.local_max_age_days = local_max_age_days
         self.now = now
         self.reader = PairingReader(self.dir, on_refusal)
         self.writer = PairingWriter(self.dir)
@@ -523,15 +546,28 @@ class PairingStore:
             return StoreView(_NOBODY, "store-untrusted-path")
         return self.reader.read()
 
-    def paired_device(self, cookie_header: str | None) -> str | None:
-        """The paired browser's short id (as `devices` lists it), or None."""
+    def max_age_days_for(self, access: str | None) -> int | None:
+        """How many days a browser paired that way stays paired: the general limit, or the shorter local one when it is set
+        (and then never longer than the general one). None: no limit."""
+        limit = self.max_age_days
+        if access == "local" and self.local_max_age_days is not None:
+            limit = self.local_max_age_days if limit is None else min(limit, self.local_max_age_days)
+        return limit
+
+    def paired_device(self, cookie_header: str | None, access: str | None = None) -> str | None:
+        """The paired browser's short id (as `devices` lists it), or None.
+
+        With `access` only a device paired that way counts: a cookie is scoped by host and not by port, so the one of the local
+        address travels to every other service on 127.0.0.1 and must not open the tailnet path, where a program that holds it
+        could write the Tailscale headers itself; and the reverse. A device with no recorded way in counts for no way."""
         if self.ancestry_problem():
             return None
-        digest = self.reader.match(cookie_header, self.cookie_name)
+        digest = self.reader.match(cookie_header, self.cookie_name, access)
         if digest is None:
             return None
-        if self.max_age_days is not None:
+        limit = self.max_age_days_for(access)
+        if limit is not None:
             paired = (self.reader.read().paired_at or {}).get(digest)
-            if paired is None or self.now() - paired > self.max_age_days * 86400:
+            if paired is None or self.now() - paired > limit * 86400:
                 return None  # paired longer ago than the configured age: no longer paired
         return digest[:8]

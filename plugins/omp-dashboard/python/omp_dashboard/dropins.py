@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -107,16 +108,37 @@ def health_dropin(config: Config, env: Mapping[str, str]) -> dict[str, Any]:
         {"id": "hub-owner", "type": "uid-owner", "port": port},
         {"id": "hub-service", "type": "watchdog", "service": "hub"},
     ]
-    if config.get("auth.adapter") == "tailscale-serve":
-        checks.append(
-            {
-                "id": "serve-route",
-                "type": "serve-route",
-                "port": config.serve_port,
-                "path": "/",
-                "target": f"http://{url_host}:{port}",
-            }
-        )
+    adapter = config.get("auth.adapter")
+    if adapter in ("tailscale-serve", "both"):
+        route: dict[str, Any] = {
+            "id": "serve-route",
+            "type": "serve-route",
+            "port": config.serve_port,
+            "path": "/",
+            "target": f"http://{url_host}:{port}",
+        }
+        if adapter == "both":
+            # The local address works without Tailscale: a missing route (Tailscale off or stopped) is reported, and never makes the hub unhealthy.
+            # The note cannot tell that from a route that points elsewhere or Funnel being on, so those get a check of their own that does fail.
+            route["severity"] = "note"
+            checks.append(route)
+            checks.append(
+                {
+                    "id": "serve-integrity",
+                    "type": "command",
+                    "argv": [
+                        sys.executable,
+                        stable_script("python/omp_dashboard_main.py", env),
+                        "serve-check",
+                        "--config-file",
+                        str(config.paths.config_file),
+                    ],
+                    "expectExit": 0,
+                    "timeoutSeconds": 20,
+                }
+            )
+        else:
+            checks.append(route)
     return {"protocol": "health/1", "plugin": APP, "checks": checks}
 
 

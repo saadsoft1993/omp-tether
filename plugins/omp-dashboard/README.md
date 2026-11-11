@@ -23,7 +23,7 @@ omp plugin marketplace add saadsoft1993/omp-tether
 omp plugin install omp-dashboard@omp-tether
 ln -s ~/.omp/plugins/node_modules/omp-dashboard/bin/omp-dashboard ~/.local/bin/omp-dashboard   # optional
 omp-dashboard run          # keep this terminal open (or use tmux/screen), or see "Keep it running"
-omp-dashboard pair         # in another terminal: prints a link that pairs one browser
+omp-dashboard pair         # in another terminal: prints a link that pairs one browser (`pair --tailnet`: the one through Tailscale Serve, see "Sign-in")
 ```
 
 `bin/omp-dashboard` is a short shell script that finds a Python 3.10 or newer (macOS's own `/usr/bin/python3` is 3.9 and is not
@@ -60,23 +60,49 @@ relay; `doctor` checks both.
 
 `auth.adapter` chooses, and the pairing cookie is checked after it, always.
 
+| `auth.adapter` | Reached by | Judged by | While Tailscale is off |
+|---|---|---|---|
+| `loopback-only` (default) | this machine's own address (`http://127.0.0.1:<port>/`), or an SSH forward | the pairing cookie, on a loopback `Host`, with no sign of a proxy | works |
+| `tailscale-serve` | your tailnet, through Tailscale Serve only | your Tailscale login, this machine's name and the cookie | the hub answers 503 while it does not know the owner and the name (not asked while both are in the config, and kept for up to a minute after a lookup) |
+| `both` | either, at once | each request by exactly one of the two rule sets above, chosen by whether it carries any sign of a proxy | the local address works; the tailnet one answers 503 while the owner and name are unknown (a pinned or cached identity keeps answering until Tailscale's transport stops delivering) |
+
 - **`loopback-only`** (default): the request must carry a loopback `Host` for this hub's port (or one in `auth.loopbackOnly.allowedHosts`,
-  for an SSH forward on another local port) and no sign of a proxy (`Tailscale-*`, `X-Forwarded-*`, `Forwarded`). Reach it from another
+  for an SSH forward on another local port) and no sign of a proxy (any `Tailscale-*` or `X-Forwarded-*` header, `Forwarded`, `Via`, `X-Real-IP`). Reach it from another
   machine with `ssh -L <port>:127.0.0.1:<port> you@machine` (same port number on both ends).
 - **`tailscale-serve`**: expose the hub on your tailnet only, never Funnel: `tailscale serve --bg --https=<servePort> http://127.0.0.1:<listen.port>`.
   Requests must carry your Tailscale login (set by Serve), this machine's name as `Host`, and the matching `Origin`; Funnel requests and
   tagged devices are refused; until the owner is known every request gets 503. The owner and name are read from `tailscale status --json`
   every minute, or fixed with `auth.tailscale.owner` and `publicHost`. A request that carries `Host`, `Tailscale-User-Login` or `Tailscale-Funnel-Request` twice is refused. What a real Serve does to forged headers was tested (Tailscale 1.104.5, macOS): a `Tailscale-User-Login` the caller sent was replaced by the real owner's login, a `Tailscale-Funnel-Request` the caller sent was removed, and a caller-sent `X-Forwarded-For` was replaced. A request from a different, real tailnet identity (a second account or a shared device) was **not** tested, because the test tailnet had one user; that refusal is proven only with forged headers on loopback. The pairing cookie is checked after the sign-in in any case.
+- **`both`**: the local address works always, even with Tailscale switched off, and the hub is also reachable through Serve. Set it up as for
+  `tailscale-serve` (the Serve route, `auth.tailscale.*`); nothing else changes. Every request is judged by **one** rule set, never a mixture:
+  - a request that carries **any sign of a proxy** (a `Tailscale-*` or `X-Forwarded-*` header, `Forwarded`, `Via` or `X-Real-IP`, in any letter case) is judged
+    by exactly the `tailscale-serve` rules: the owner's login, this machine's name and Serve's port as `Host`, no Funnel, no tagged device, no repeated header;
+    it needs the owner's login, so a request that only *looks* direct but carries a forged Tailscale header is refused unless it also names the owner and this machine;
+  - a request that carries **none** is judged by the `loopback-only` rules: a loopback `Host` for this hub's port (or one in `auth.loopbackOnly.allowedHosts`); it can never use the tailnet rules, whatever `Host` it names;
+  - anything else is refused with the same fixed texts as before.
+
+  What follows the request follows the same choice: a POST's `Origin` must be the origin of the way the request came (`http://127.0.0.1:<port>` or `https://<name>:<servePort>`, not the other one), and the pairing cookie is `Secure`
+  only for a request that came through Serve (a browser may refuse a `Secure` cookie from plain `http://127.0.0.1`). The cookie belongs to the address the browser used, so a browser
+  pairs **once per address** (`127.0.0.1`, `localhost` and the tailnet name are three addresses). A pairing link works once, on either address, and the device it makes is **of that address's way only**:
+  the hub records the way with the device (an optional `access` field in `devices.json`, which `pairing-store/1` readers ignore) and accepts a cookie only on a request of the same way. The local cookie is the weak one
+  (not `Secure`, and sent to every other service on `127.0.0.1`), so a copy of it, even with a forged `Tailscale-User-Login`, is a 401 through Serve, and a tailnet device is a 401 on the local address.
+  The local device is also short-lived: `pairing.localMaxAgeDays` (default 7, never more than `pairing.maxAgeDays`). A device with no recorded way in (made by `omp-private-relay`'s own `pair`, or by a hub before 0.2.0) is refused on both ways and has to be paired again; `doctor` counts them and `devices` shows each device's way.
+  `ssh -L`, a Docker port mapping, a VS Code forwarded port and `tailscale serve --tcp` carry no HTTP header and keep the `Host` you used, so a request through one with a loopback `Host` is served as a **direct** (local) request, and a device paired through it is a local one; the `Host` check and the cookie are what protect it. Do not forward the hub's port to other people.
+  `omp-dashboard pair` prints the local link; `omp-dashboard pair --tailnet` asks Tailscale for its state (`tailscale status --json`, bounded, even when the owner and name are in the config) and prints the Serve link only when it is `Running`; when it is stopped, needs a login, did not answer or the command is missing, it says which, prints the local link instead and exits 1.
+  `doctor` reports the local address (asked of the sign-in itself, not of `/healthz`), Tailscale and the Serve route separately. Tailscale being off, not found, or the route absent is a warning about the tailnet path, never a failure of the local one; **a Serve route that points somewhere else, or Funnel being on, is a failure** in this mode too.
+  The health drop-in (see "Keep it running") reports the Serve route as a `note` (an absent route or a stopped Tailscale never makes the hub unhealthy) and adds a separate `serve-integrity` check that does fail when Funnel is on or the route points elsewhere.
+  **Open and Watch with `both`: the bundled relay admits one way, so a link is offered to browsers of that way.** `omp-private-relay` has two sign-ins and one is chosen when it starts: `token` admits direct browsers on this machine's own address and refuses what Tailscale Serve adds; `tailscale-serve` admits only browsers that come through Serve. Set `relay.admits` to match (`local`, the default, for a `token` relay; `tailnet` for a `tailscale-serve` relay). Browsers of the admitted way get a link; browsers of the other way get a message saying why (409 `relay_other_path`), not a link that the relay would refuse. Serving both ways at once from one relay needs a change in the relay itself, which this release does not make.
+  With a `local` relay the link opens at the **host name the browser used** (`127.0.0.1` or `localhost`, at the relay's guest port), so the browser's cookie is sent. It is offered only when the `Host` is exactly `127.0.0.1` or `localhost` at this hub's own port; `[::1]`, another name or another port (an `allowedHosts` forward) get 409 `relay_address` and no link. **A forward on the same port number cannot be told apart from a direct request**: `ssh -L <port>:127.0.0.1:<port>`, a Docker mapping or a VS Code forward that keeps the hub's port number sends `Host: 127.0.0.1:<port>`, so the hub offers the link, and it then names the *browser's* machine, not the hub's (the relay proof only shows that the listener on the hub machine is your relay). Through such a forward, forward the relay's guest port too (to the same relay) before using Open and Watch, or do not use them. While the owner and name are unknown (and `relay.webUrl` is not set) a `tailnet` relay has no web address and sessions show the relay as unknown; a `local` relay is not affected.
 
 The pairing cookie is not scoped to a port: a browser sends it to every service on the same host name, so on `127.0.0.1` another local web server sees
-it, and a hub on another port receives it. Over `tailscale-serve` the cookie is `Secure`. A `__Host-` cookie name is not available (the name is limited to letters, digits and `_`).
+it, and a hub on another port receives it. Over `tailscale-serve` (and through Serve with `both`) the cookie is `Secure`; on the local address with `both` it is not. A `__Host-` cookie name is not available (the name is limited to letters, digits and `_`).
 When `omp-private-relay` runs in shared mode it reads the same store and applies no age limit of its own; `pairing.maxAgeDays` is enforced by this hub.
 
 ## Keep it running
 
 With omp-services: `omp-dashboard dropins` shows, and `--write` writes, `services.d/omp-dashboard.json` (a `services/1` description:
 `python .../omp_dashboard_main.py run`, pinned to this configuration file) and `health.d/omp-dashboard.json` (`health/1`: `/healthz`
-freshness, the port, who owns it, a watchdog, and the Serve route with tailscale-serve). Then `omp-services init` shows its plan and asks.
+freshness, the port, who owns it, a watchdog, and with tailscale-serve or both the Serve route; with `both` that check is a `note`, and a second check, `serve-integrity`, fails the hub only when Funnel is on or the route points elsewhere). Then `omp-services init` shows its plan and asks.
 
 Without it, run `omp-dashboard run` yourself, or write a unit. A minimal `~/.config/systemd/user/omp-dashboard.service`:
 
@@ -113,23 +139,25 @@ your shell (`dropins --write` refuses while any are set). Changes need a restart
 | `schemaVersion` | | `1` | Required in the file |
 | `listen.host` |  | `"127.0.0.1"` | The address the hub binds. Loopback only: the hub speaks plain HTTP and refuses to start on any other address. To reach it from another device, put tailscale serve or an SSH forward in front of it. |
 | `listen.port` | `OMP_DASHBOARD_PORT` | `17795` | The port the hub listens on. |
-| `auth.adapter` | `OMP_DASHBOARD_AUTH` | `"loopback-only"` | Who may even ask. loopback-only: the pairing cookie alone, on a loopback Host. tailscale-serve: requests must come through Tailscale Serve and name this machine's owner, besides the cookie. |
+| `auth.adapter` | `OMP_DASHBOARD_AUTH` | `"loopback-only"` | Who may even ask. loopback-only: the pairing cookie alone, on a loopback Host. tailscale-serve: requests must come through Tailscale Serve and name this machine's owner, besides the cookie. both: a request with any sign of a proxy is judged by the tailscale-serve rules, one with none by the loopback-only rules; the local address keeps working while Tailscale is off. |
 | `auth.loopbackOnly.allowedHosts` |  | `[]` | Extra host:port values the browser may use, for an SSH forward on another local port. |
 | `auth.tailscale.bin` | `OMP_DASHBOARD_TAILSCALE_BIN` | `null` | Absolute path of the tailscale command. null: found on PATH, then in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, then the macOS app bundle. `doctor` names this key when it cannot find the command. |
 | `auth.tailscale.servePort` | `OMP_DASHBOARD_TAILSCALE_SERVE_PORT` | `null` | The https port of `tailscale serve` that forwards to the hub. null: the same number as listen.port. |
-| `auth.tailscale.owner` | `OMP_DASHBOARD_TAILSCALE_OWNER` | `null` | Owner login. null: read from Tailscale. With publicHost, Tailscale is not asked at all. |
+| `auth.tailscale.owner` | `OMP_DASHBOARD_TAILSCALE_OWNER` | `null` | Owner login. null: read from Tailscale. With publicHost, the hub does not ask Tailscale for the owner or the name (`pair --tailnet` and `doctor` still ask whether it is running). |
 | `auth.tailscale.publicHost` | `OMP_DASHBOARD_TAILSCALE_HOST` | `null` | This machine's MagicDNS name. null: read from Tailscale. |
 | `pairing.dir` | `OMP_DASHBOARD_PAIRING_DIR` | `null` | The pairing store (pairing-store/1). null: <config dir>/pairing. To let omp-private-relay accept the same browsers, point its pairing.dir here and set its pairing.mode to shared. |
 | `pairing.cookieName` | `OMP_DASHBOARD_COOKIE_NAME` | `"omp_dashboard"` | The cookie that holds the browser's session id. omp-private-relay in shared mode must use the same name. |
 | `pairing.maxAgeDays` | `OMP_DASHBOARD_PAIRING_MAX_AGE_DAYS` | `90` | A paired browser stops being paired this many days after it was paired (its cookie expires then too); 1 to 3650, or null for never. `omp-private-relay` in shared mode does not apply this limit. |
+| `pairing.localMaxAgeDays` | `OMP_DASHBOARD_PAIRING_LOCAL_MAX_AGE_DAYS` | `7` | With `both`: a browser paired on the local address stops being paired this many days after it was paired (never more than `maxAgeDays`; its cookie expires then too); 1 to 3650, or null for the same limit as `maxAgeDays`. Not used with the other adapters. |
 | `omp.bin` | `OMP_DASHBOARD_OMP_BIN` | `null` | Absolute path of omp. null: OMP_BIN, then PATH. |
 | `control.dir` | `OMP_DASHBOARD_CONTROL_DIR` | `null` | omp-session-control's control directory (session-control/1). null: OMP_SESSION_CONTROL_DIR, then ~/.config/omp-session-control. Stop and Rename need it. |
 | `relay.enabled` | `OMP_DASHBOARD_RELAY_ENABLED` | `false` | Offer Open and Watch through omp-private-relay. Off: sessions are listed, and no link is ever handed out. |
 | `relay.hostPort` | `OMP_DASHBOARD_RELAY_HOST_PORT` | `17797` | The relay's host listener (where omp sessions connect). omp's collab.relayUrl must be ws://127.0.0.1:<this>. |
 | `relay.guestPort` | `OMP_DASHBOARD_RELAY_GUEST_PORT` | `17796` | The relay's guest listener (where browsers connect). |
 | `relay.checkDir` | `OMP_DASHBOARD_RELAY_CHECK_DIR` | `null` | The relay's check directory (relay-check/1). null: <config home>/omp-private-relay/check. |
-| `relay.webUrl` | `OMP_DASHBOARD_RELAY_WEB_URL` | `null` | The address a browser uses for the relay's web client, and omp's collab.webUrl. null: http://127.0.0.1:<guestPort> with loopback-only, https://<name>:<servePort> with tailscale-serve. |
-| `relay.servePort` | `OMP_DASHBOARD_RELAY_SERVE_PORT` | `null` | With tailscale-serve: the https port of `tailscale serve` for the relay's guest listener. null: guestPort. |
+| `relay.webUrl` | `OMP_DASHBOARD_RELAY_WEB_URL` | `null` | The address a browser uses for the relay's web client, and omp's collab.webUrl. null: http://127.0.0.1:<guestPort> with loopback-only, https://<name>:<servePort> with tailscale-serve. With both and relay.admits tailnet: the address for browsers that come through Tailscale Serve (null: https://<name>:<servePort>). |
+| `relay.servePort` | `OMP_DASHBOARD_RELAY_SERVE_PORT` | `null` | With tailscale-serve, or both with relay.admits tailnet: the https port of `tailscale serve` for the relay's guest listener. null: guestPort. |
+| `relay.admits` | `OMP_DASHBOARD_RELAY_ADMITS` | `"local"` | With auth.adapter both only: which browsers the running omp-private-relay admits. `local`: its sign-in is `token`, direct browsers on this machine's own address (Open and Watch are offered to them only). `tailnet`: its sign-in is `tailscale-serve` (offered to browsers through Tailscale Serve only). A relay admits one way; the other gets a message instead of a link. |
 | `start.backend` | `OMP_DASHBOARD_START_BACKEND` | `"off"` | How Start opens a new session: in a herdr tab, in a tmux window, or not at all. |
 | `start.roots` | `OMP_DASHBOARD_START_ROOTS` | `[]` | Folders Start may open sessions in: each one, and every git repository below it. Empty: nothing can be started. |
 | `start.maxDepth` |  | `3` | How deep below a root to look for git repositories. |

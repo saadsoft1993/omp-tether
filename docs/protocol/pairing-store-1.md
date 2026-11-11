@@ -48,9 +48,12 @@ object:
 | key | `hex(sha256(utf8(cookie value)))`, lowercase, 64 characters. The hash is over the cookie value exactly as sent, with no decoding |
 | `label` | a short description of the browser, for people. Writers store at most 80 characters and drop control and invisible formatting characters; readers MUST NOT rely on it |
 | `paired_at` | integer seconds since the epoch |
+| `access` | optional: `"local"` or `"tailnet"`, the way the browser was paired (on the machine's own loopback address, or through Tailscale Serve). Written by a dashboard that serves both ways in and lets a device in only the way it was paired; a reader of this protocol ignores it, and a program that does not record it leaves it out |
 
 A reader uses **only the keys**. A key that is not 64 lowercase hex characters can never match a hash and is ignored; the
-store is not refused because of it. An empty object is a valid store: nobody is paired.
+store is not refused because of it. An empty object is a valid store: nobody is paired. A writer that rewrites `devices.json`
+keeps every field of the entries it does not remove (`access` included), and a program that reads `access` treats a missing
+or unknown value as "no recorded way in", never as either.
 
 ## 4. Reading: who is paired, and when the answer is "nobody"
 
@@ -128,7 +131,9 @@ epoch (a number).
 ### The cookie
 
 The program that redeems the token sets the cookie: `Set-Cookie: <name>=<session>; Path=/; Max-Age=31536000; HttpOnly;
-SameSite=Strict`, plus `Secure` when the page is served over https. A program that offers redemption over the network
+SameSite=Strict`, plus `Secure` when the page is served over https. The `Max-Age` is the program's choice: one year is the
+default this document shows, and a program MAY use a shorter one (and enforce it on the server side, as `devices.json`
+records `paired_at`), for example for a cookie that is not `Secure`. A program that offers redemption over the network
 MUST limit failed attempts, MUST refuse a request that does not carry a custom header (so a plain cross-site form post
 cannot redeem), and MUST NOT log a token or a cookie value.
 

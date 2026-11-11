@@ -29,7 +29,7 @@ DEFAULTS: dict[str, Any] = {
         "loopbackOnly": {"allowedHosts": []},
         "tailscale": {"bin": None, "servePort": None, "owner": None, "publicHost": None},
     },
-    "pairing": {"dir": None, "cookieName": "omp_dashboard", "maxAgeDays": 90},
+    "pairing": {"dir": None, "cookieName": "omp_dashboard", "maxAgeDays": 90, "localMaxAgeDays": 7},
     "omp": {"bin": None},
     "control": {"dir": None},
     "relay": {
@@ -39,6 +39,7 @@ DEFAULTS: dict[str, Any] = {
         "checkDir": None,
         "webUrl": None,
         "servePort": None,
+        "admits": "local",
     },
     "start": {
         "backend": "off",
@@ -84,6 +85,7 @@ ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "OMP_DASHBOARD_PAIRING_DIR": (("pairing", "dir"), str),
     "OMP_DASHBOARD_COOKIE_NAME": (("pairing", "cookieName"), str),
     "OMP_DASHBOARD_PAIRING_MAX_AGE_DAYS": (("pairing", "maxAgeDays"), _int),
+    "OMP_DASHBOARD_PAIRING_LOCAL_MAX_AGE_DAYS": (("pairing", "localMaxAgeDays"), _int),
     "OMP_DASHBOARD_OMP_BIN": (("omp", "bin"), str),
     "OMP_DASHBOARD_CONTROL_DIR": (("control", "dir"), str),
     "OMP_DASHBOARD_RELAY_ENABLED": (("relay", "enabled"), _bool),
@@ -92,6 +94,7 @@ ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "OMP_DASHBOARD_RELAY_CHECK_DIR": (("relay", "checkDir"), str),
     "OMP_DASHBOARD_RELAY_WEB_URL": (("relay", "webUrl"), str),
     "OMP_DASHBOARD_RELAY_SERVE_PORT": (("relay", "servePort"), _int),
+    "OMP_DASHBOARD_RELAY_ADMITS": (("relay", "admits"), str),
     "OMP_DASHBOARD_START_BACKEND": (("start", "backend"), str),
     "OMP_DASHBOARD_START_ROOTS": (("start", "roots"), _roots),
     "OMP_DASHBOARD_HERDR_BIN": (("start", "herdr", "bin"), str),

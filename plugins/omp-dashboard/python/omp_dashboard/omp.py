@@ -15,7 +15,7 @@ import shutil
 import socket
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from .util import DashboardError, RunResult, printable, run_bounded
@@ -186,15 +186,17 @@ def machine_name(configured: str | None, omp: Omp | None) -> str:
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-def link_relay(url: str | None, web_url: str | None, relay_url: str | None) -> str:
+def link_relay(url: str | None, web_url: str | Sequence[str] | None, relay_url: str | None) -> str:
     """'private' for a link served by our collab-web and routed through our relay, else 'public'.
 
-    omp web links look like `<webUrl>/#<relay origin>/r/<room>.<key>`; both halves must be ours.
+    omp web links look like `<webUrl>/#<relay origin>/r/<room>.<key>`; both halves must be ours. `web_url` is the address
+    of our collab-web, or every address it has (with `both`, the loopback names of this machine: 127.0.0.1 and localhost).
     """
-    if not web_url or not relay_url:
+    web_urls = [web_url] if isinstance(web_url, str) else list(web_url or ())
+    if not any(web_urls) or not relay_url:
         return "public"
     base, sep, fragment = (url or "").partition("/#")
-    if not sep or base.rstrip("/").lower() != web_url.rstrip("/").lower():
+    if not sep or not any(base.rstrip("/").lower() == w.rstrip("/").lower() for w in web_urls if w):
         return "public"
     return "private" if fragment.lower().startswith(relay_url.rstrip("/").lower() + "/r/") else "public"
 
@@ -216,13 +218,17 @@ class RelayClassifier:
         self.lock = threading.Lock()
 
     def annotate(
-        self, hosts: list[dict[str, Any]], web_url: str | None, relay_url: str | None, enabled: bool = True
+        self,
+        hosts: list[dict[str, Any]],
+        web_url: str | Sequence[str] | None,
+        relay_url: str | None,
+        enabled: bool = True,
     ) -> list[dict[str, Any]]:
         if not enabled or not relay_url:
             for h in hosts:
                 h["relay"] = "off"
             return hosts
-        if not web_url:  # Tailscale is not answering: our links cannot be told from public ones
+        if not web_url:  # our own web address is not known: our links cannot be told from public ones
             for h in hosts:
                 h["relay"] = "unknown"
             return hosts
@@ -256,14 +262,27 @@ class RelayClassifier:
         return hosts
 
 
+def retarget(url: str, web_url: str) -> str:
+    """The same link at another web address: `<web_url>/#<everything after the old address>`."""
+    _, _, fragment = url.partition("/#")
+    return f"{web_url.rstrip('/')}/#{fragment}"
+
+
 def session_link(
-    omp: Omp, instance_id: str, view: bool, web_url: str, relay_url: str, attempts: int = 3
+    omp: Omp,
+    instance_id: str,
+    view: bool,
+    web_url: str | Sequence[str],
+    relay_url: str,
+    attempts: int = 3,
+    open_at: str | None = None,
 ) -> dict[str, Any]:
     """A fresh browser link for the session's current room, fetched at click time.
 
     Rooms rotate (session switch, /collab restart). `omp collab link` lists the hosts, then asks for the generation it
     just saw and fails if the room moved in between; the retry lists again and follows the new generation. Full-control
     links steer the agent on this machine: never log or store them. Only links through our own relay are ever returned.
+    `open_at` (one of our web addresses) is the address the returned link opens at, whichever of ours omp put in it.
     """
     if not INSTANCE_ID.match(instance_id or ""):
         raise ValueError("bad session id")
@@ -279,4 +298,6 @@ def session_link(
     relay = link_relay(url if isinstance(url, str) else None, web_url, relay_url)
     if relay == "public":
         raise PublicRelayError(STILL_PUBLIC)
+    if open_at and isinstance(url, str):
+        url = retarget(url, open_at)
     return {"url": url, "generation": out.get("generation"), "relay": relay}

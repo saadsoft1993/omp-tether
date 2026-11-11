@@ -1,7 +1,7 @@
 """The `omp-dashboard` command line.
 
     omp-dashboard run                      run the hub (in a terminal you keep open, or under omp-services / a unit you wrote)
-    omp-dashboard pair                     print a single-use link that pairs one browser (valid 5 minutes)
+    omp-dashboard pair [--tailnet]         print a single-use link that pairs one browser (valid 5 minutes); with `both`, the local one unless --tailnet
     omp-dashboard devices                  list paired browsers
     omp-dashboard revoke <id|all>          unpair one browser (4 or more characters of its id), or every browser
     omp-dashboard doctor [--json]          check everything and say what is wrong; changes nothing
@@ -29,7 +29,7 @@ from .config import Config, default_config_text, load_config
 from .dropins import dropin_paths, dropin_text, health_dropin, services_dropin, stray_overrides, write_dropin
 from .hostplat import Platform, PlatformError
 from .pairing import PairingError, PairingStore
-from .paths import Paths, from_env
+from .paths import CONFIG_FILE_ENV, Paths, from_env
 from .util import DashboardError, ensure_private_dir, trust_ancestors, write_file
 
 PAIR_MINUTES = 5
@@ -98,7 +98,36 @@ def cmd_pair(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     if config is None:
         return 2
     adapter = build_adapter(config, dict(env))
-    url = adapter.public_url()
+    if args.tailnet and adapter.name == "loopback-only":
+        _err(
+            'omp-dashboard: there is no tailnet link: auth.adapter is loopback-only. Set it to "both" (this machine\'s own '
+            'address keeps working) or "tailscale-serve", put Tailscale Serve in front of the hub, and try again.'
+        )
+        return 2
+    # With tailscale-serve the hub answers nowhere but through Serve; with both, the local link is the default.
+    access = "tailnet" if args.tailnet or adapter.name == "tailscale-serve" else "local"
+    url = adapter.tailnet_url() if access == "tailnet" else adapter.public_url()
+    tailnet_missing = False
+    if access == "tailnet" and adapter.name == "both":
+        # Identity (the owner and the name) can be configured or cached while Tailscale is off: ask it, now, whether it is up.
+        state = adapter.backend_state()
+        reasons = {
+            "Running": None,
+            "not-found": "the tailscale command was not found",
+            "unknown": "Tailscale did not answer",
+            "Stopped": "Tailscale is stopped",
+            "NeedsLogin": "Tailscale needs a login",
+            "NeedsMachineAuth": "Tailscale is waiting for this machine to be approved",
+        }
+        reason = reasons.get(state, f"Tailscale is not running (state: {state})")
+        if reason is None and not url:
+            reason = "Tailscale does not know this machine"
+        if reason is not None:
+            _err(
+                f"omp-dashboard: {reason}, so there is no tailnet link. "
+                "The local link, which works on this machine without Tailscale, is printed instead."
+            )
+            url, access, tailnet_missing = adapter.public_url(), "local", True
     if not url:
         _err("omp-dashboard: Tailscale is not running or does not know this machine; start it and try again.")
         _audit(config, "pair-token", None, "refused:no_address")
@@ -125,14 +154,14 @@ def cmd_pair(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     _audit(config, "pair-token", None, "created")
     link = f"{url}#pair={token}"
     if args.json:
-        _say(json.dumps({"url": link, "expiresInSeconds": PAIR_MINUTES * 60}))
-        return 0
+        _say(json.dumps({"url": link, "access": access, "expiresInSeconds": PAIR_MINUTES * 60}))
+        return 1 if tailnet_missing else 0
     _err(
         f"Open this link in the browser you want to pair, within {PAIR_MINUTES} minutes. It works once: do not paste it anywhere "
         "else, and run this in a terminal, not inside an omp session (the link would land in its transcript)."
     )
     _say(link)
-    return 0
+    return 1 if tailnet_missing else 0
 
 
 def cmd_devices(args: argparse.Namespace, env: Mapping[str, str]) -> int:
@@ -148,7 +177,7 @@ def cmd_devices(args: argparse.Namespace, env: Mapping[str, str]) -> int:
         _say("No browser is paired.")
     for d in devices:
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(d.paired_at))
-        _say(f"{d.id}  paired {when}  {d.label}")
+        _say(f"{d.id}  paired {when}  {d.access or '-':<7}  {d.label}")
     return 0
 
 
@@ -296,13 +325,31 @@ def cmd_dropins(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     return 0
 
 
+def cmd_serve_check(args: argparse.Namespace, env: Mapping[str, str]) -> int:
+    """The route's integrity alone, for the health drop-in: 1 when Funnel is on or the Serve route points elsewhere, else 0
+    (Tailscale off, the tool missing and an absent route are availability: `doctor` warns about them, the heartbeat does not fail)."""
+    if args.config_file:
+        env = {**env, CONFIG_FILE_ENV: args.config_file}
+    config = _valid(env)
+    if config is None:
+        return 2
+    ok, what = doctor.serve_integrity(config, env)
+    _say(("ok: " if ok else "failing: ") + what)
+    return 0 if ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="omp-dashboard", description="A local dashboard for your own omp sessions.")
     parser.add_argument("--version", action="version", version=f"omp-dashboard {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("run", help="run the hub").set_defaults(fn=cmd_run)
     p = sub.add_parser("pair", help="print a single-use pairing link")
-    p.add_argument("--json", action="store_true", help="print {url, expiresInSeconds} as JSON")
+    p.add_argument("--json", action="store_true", help="print {url, access, expiresInSeconds} as JSON")
+    p.add_argument(
+        "--tailnet",
+        action="store_true",
+        help="the link that opens through Tailscale Serve (with sign-in `both`; `pair` prints the local link by default)",
+    )
     p.set_defaults(fn=cmd_pair)
     sub.add_parser("devices", help="list paired browsers").set_defaults(fn=cmd_devices)
     p = sub.add_parser("revoke", help="unpair one browser, or all")
@@ -323,6 +370,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("dropins", help="show or write the omp-services drop-ins")
     p.add_argument("--write", action="store_true")
     p.set_defaults(fn=cmd_dropins)
+    p = sub.add_parser(
+        "serve-check",
+        help="exit 1 only when Funnel is on, or the Serve route points elsewhere (for the health drop-in)",
+    )
+    p.add_argument("--config-file", help="the configuration file to read (an absolute path)")
+    p.set_defaults(fn=cmd_serve_check)
     return parser
 
 
