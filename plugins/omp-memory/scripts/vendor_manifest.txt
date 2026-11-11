@@ -1,0 +1,39 @@
+# What is copied from the source tree into vendor/, byte for byte. Paths are relative to its root and keep
+# the same layout under vendor/, because the vendored code imports its neighbours by that layout
+# (memory_import/redact_bridge.py puts the directory above it on sys.path; memory_ops/hindsight_pages.py imports
+# omp_hub.memory.hindsight; the omp_hub modules import each other relatively).
+#
+#   tree <dir> [exclude <name> ...]   every file below <dir>, minus the named files and caches
+#   file <path>                       one file
+#
+# Edit this file, run scripts/sync-vendor.sh, and commit vendor/ together with vendor/SOURCE.sha256.
+
+# The importer: TypeScript on Bun, its tests, its README and the redaction bridge.
+tree memory_import exclude tsconfig.json
+
+# Backups, restore drill and the read-only Hindsight export.
+file memory_ops/__init__.py
+file memory_ops/backup_mnemopi.sh
+file memory_ops/restore_drill.sh
+file memory_ops/export_hindsight.sh
+file memory_ops/hindsight_pages.py
+
+# What redact_bridge.py imports.
+file hindsight_proxy/__init__.py
+file hindsight_proxy/redact.py
+file hindsight_import/__init__.py
+file hindsight_import/import_mnemopi.py
+file hindsight_import/routing.py
+
+# Banks, sources, labels and instruction files: the hub's memory modules that stand alone (they import only each
+# other). The hub package itself, its service and its revision store are not copied.
+file omp_hub/memory/model.py
+file omp_hub/memory/graph.py
+file omp_hub/memory/folders.py
+file omp_hub/memory/mnemopi.py
+file omp_hub/memory/sources.py
+file omp_hub/memory/instructions.py
+file omp_hub/memory/hindsight.py
+
+# The real mnemopi schema and a bank builder, used by this plugin's tests.
+file omp_hub/test_memory_schema.py

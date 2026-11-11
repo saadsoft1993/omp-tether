@@ -241,7 +241,7 @@ class LoopTests(HeartbeatCase):
             deadline = time.time() + 20
             while time.time() < deadline and not srv.requests:
                 time.sleep(0.1)
-            self.assertTrue(srv.requests, "the first round pinged")
+            self.assertTrue(srv.requests, "the loop pinged on its first pass")
         finally:
             proc.terminate()
         out, err = proc.communicate(timeout=20)

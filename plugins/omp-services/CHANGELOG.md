@@ -11,11 +11,9 @@ change only by spec; see `docs/protocol/` in the repository.
 
 First release.
 
-**Scope decision: there is no `upgrade` command in 0.1.** An earlier design had `omp-services upgrade` with a snapshot,
-a write-ahead journal and a rollback. It was removed, with everything that existed only for it, to keep the first release
-small enough to verify: omp has its own `omp plugin upgrade`; `omp-services doctor` reports "newer version available" and
-drift; `omp-services init` re-renders the units (changed units only, protected units never touched). A rollback may come
-back in a later release if there is a need for it.
+**Scope decision: there is no `upgrade` command in 0.1.** omp has its own `omp plugin upgrade`; `omp-services doctor` reports
+"newer version available" and drift; `omp-services init` re-renders the units (changed units only, protected units never
+touched). There is no snapshot, journal or rollback. A rollback may come back in a later release if there is a need for it.
 
 - Command line `omp-services`: `init` (plan, confirmation, apply; safe to repeat), `doctor`, `uninstall` (keeps configuration, secrets, logs), `purge` (its own
   confirmation, only directories it created), `heartbeat`, `health`, `config`, `render`.

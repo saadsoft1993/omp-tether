@@ -1,4 +1,4 @@
-// The trust walk of the web client's path (verification pass 2, findings 1 and 2). Each case builds its tree at run time in a
+// The trust walk of the web client's path. Each case builds its tree at run time in a
 // scratch directory and asks the walk, with the group database and the ACL tools replaced where the answer must not depend
 // on this machine.
 import { afterAll, describe, expect, test } from "bun:test";

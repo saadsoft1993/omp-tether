@@ -1,4 +1,4 @@
-"""Regression tests for the verification pass (R2-R12), each written before its fix and run against the code as it was."""
+"""Regression tests: live pairing verdict, kill group and root binding, revoke all, deadlines, secret file ACLs, profile and lexical paths, caches, audit lines."""
 
 from __future__ import annotations
 
@@ -22,12 +22,12 @@ from omp_dashboard.pairing import PairingReader, PairingStore, PairingWriter
 from omp_dashboard.paths import from_env
 from omp_dashboard.util import DashboardError, run_bounded
 from support import MAIN, PLUGIN, Client, ScratchTestCase, host_entry
-from test_review1 import FakePlatform, Tmp, cli
+from test_regressions_1 import FakePlatform, Tmp, cli
 
-# R2 ---------------------------------------------------------------------------------------------------------------------------
+# live verdict -----------------------------------------------------------------------------------------------------------------
 
 
-class R2LiveVerdict(Tmp):
+class LiveVerdict(Tmp):
     def paired(self) -> tuple[PairingStore, str]:
         store = PairingStore(self.root / "store", "c")
         session = store.writer.redeem(store.writer.create_token(), "x")
@@ -74,10 +74,10 @@ class R2LiveVerdict(Tmp):
         self.assertIsNone(store.paired_device(cookie))
 
 
-# R3 ---------------------------------------------------------------------------------------------------------------------------
+# kill group -------------------------------------------------------------------------------------------------------------------
 
 
-class R3Killpg(unittest.TestCase):
+class KillGroup(unittest.TestCase):
     def test_a_reaped_leader_whose_descendant_keeps_the_pipe_open_is_not_followed_by_a_group_signal(self) -> None:
         calls: list[int] = []
         real = os.killpg
@@ -90,10 +90,10 @@ class R3Killpg(unittest.TestCase):
         self.assertIsNotNone(r)
 
 
-# R4 ---------------------------------------------------------------------------------------------------------------------------
+# force kill root --------------------------------------------------------------------------------------------------------------
 
 
-class R4Root(unittest.TestCase):
+class ForceKillRoot(unittest.TestCase):
     def setUp(self) -> None:
         self.uid = os.getuid()
         self.host = host_entry(1, pid=4242, startedAt=1_000_000_000_000)
@@ -163,10 +163,10 @@ class R4Root(unittest.TestCase):
         self.assertEqual((r["outcome"], r["remaining"], r["parent_running"]), ("still_running", 1, False))
 
 
-# R5 ---------------------------------------------------------------------------------------------------------------------------
+# revoke all -------------------------------------------------------------------------------------------------------------------
 
 
-class R5RevokeAll(Tmp):
+class RevokeAll(Tmp):
     def test_a_redemption_cannot_land_between_unpairing_and_cancelling_links(self) -> None:
         w = PairingWriter(self.root / "store")
         token = w.create_token()
@@ -198,7 +198,7 @@ class R5RevokeAll(Tmp):
         self.assertNotIn("clear_pending", text)
 
 
-# R6 ---------------------------------------------------------------------------------------------------------------------------
+# deadlines --------------------------------------------------------------------------------------------------------------------
 
 
 class SlowBody:
@@ -246,7 +246,7 @@ class SlowBody:
             c.close()
 
 
-class R6Deadlines(unittest.TestCase):
+class Deadlines(unittest.TestCase):
     def each(self):
         for mode in ("http10", "close", "chunked"):
             slow = SlowBody(mode)
@@ -278,11 +278,11 @@ class R6Deadlines(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 5, mode)
 
 
-# R7 ---------------------------------------------------------------------------------------------------------------------------
+# secret files -----------------------------------------------------------------------------------------------------------------
 
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS ACLs")
-class R7SecretAcl(Tmp):
+class SecretAcl(Tmp):
     def readable_parent(self) -> Path:
         parent = self.root / "p"
         parent.mkdir(mode=0o700)
@@ -316,7 +316,7 @@ class R7SecretAcl(Tmp):
             util.ensure_private_dir(parent / "secrets")
 
 
-class R7Delete(ScratchTestCase):
+class SecretDelete(ScratchTestCase):
     def test_clearing_the_topic_walks_the_ancestors_like_every_other_change(self) -> None:
         s = self.make()
         loose = s.root / "loose"
@@ -333,10 +333,10 @@ class R7Delete(ScratchTestCase):
         self.assertTrue(topic.exists())
 
 
-# R8 / R9 ----------------------------------------------------------------------------------------------------------------------
+# profile and lexical paths ----------------------------------------------------------------------------------------------------
 
 
-class R8Profile(ScratchTestCase):
+class Profile(ScratchTestCase):
     def test_a_configured_ranking_directory_does_not_excuse_a_profile_variable(self) -> None:
         s = self.make()
         s.write_config(
@@ -355,7 +355,7 @@ class R8Profile(ScratchTestCase):
         self.assertIn("PI_CODING_AGENT_DIR", r.stderr)
 
 
-class R9Lexical(ScratchTestCase):
+class Lexical(ScratchTestCase):
     def test_home_and_the_fallback_variables_refuse_dot_dot_like_the_rest(self) -> None:
         s = self.make()
         with self.assertRaises(DashboardError):
@@ -365,10 +365,10 @@ class R9Lexical(ScratchTestCase):
             self.assertTrue([p for p in load_config(from_env(env), env).problems if name in p], name)
 
 
-# R10 --------------------------------------------------------------------------------------------------------------------------
+# cache ------------------------------------------------------------------------------------------------------------------------
 
 
-class R10Cache(Tmp):
+class Cache(Tmp):
     def test_a_store_with_devices_is_parsed_once_until_the_file_changes(self) -> None:
         store = PairingStore(self.root / "store", "c")
         store.writer.redeem(store.writer.create_token(), "x")
@@ -378,10 +378,10 @@ class R10Cache(Tmp):
         self.assertIs(reader.read(), first, "the cache key must be the file's fingerprint, not the last JSON key")
 
 
-# R11 --------------------------------------------------------------------------------------------------------------------------
+# audit lines ------------------------------------------------------------------------------------------------------------------
 
 
-class R11Audit(ScratchTestCase):
+class AuditLines(ScratchTestCase):
     def lines(self, hub) -> list[tuple[str, str]]:
         p = hub.config.audit_file
         return [(x["action"], x["outcome"]) for x in map(json.loads, p.read_text().splitlines())] if p.exists() else []

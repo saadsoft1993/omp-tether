@@ -25,5 +25,5 @@ The latest release only, while the version is below 1.0.
 
 ## What is not claimed
 
-Two independent reviews of 0.1.0 have been done and their findings fixed (see the changelog); that is not a certification, and there has been no third-party audit. The threat model lists what it is meant to defend against and what it
+This is not a certification, and there has been no third-party audit. The threat model lists what it is meant to defend against and what it
 accepts. Do not enable it on an account you share with people you do not trust.

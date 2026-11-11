@@ -3,11 +3,8 @@
 For people deciding whether to run it, and for people reviewing it. Plain language. The two contracts it implements are in
 [`pairing-store-1.md`](../../../docs/protocol/pairing-store-1.md) and [`relay-check-1.md`](../../../docs/protocol/relay-check-1.md).
 
-Status: the design comes from a relay that had an independent security review (findings fixed, each covered by a test).
-This plugin as generalised has had **independent security reviews**; every finding was fixed or answered with evidence, and
-`make test-mutation` reverts each fix in a copy and requires the designated regression test to fail (it covers the guards a
-test can observe; a second layer that backs up another is not mutated alone). It has had no third-party audit and no review of
-the fixes themselves. The
+Status: beta. `make test-mutation` reverts each guard in a copy and requires the designated regression test to fail (it covers the guards a
+test can observe; a second layer that backs up another is not mutated alone). It has had no third-party audit. The
 "accepted" items below are the author's judgement. Treat early releases as beta software.
 
 ## What it is, and what it gives an attacker
@@ -118,7 +115,7 @@ single-user machine, or a layer below what the plugin can see.
 
 ## Open items
 
-- A further independent security review of this tree before the first public release.
+- No third-party audit has been done.
 - The `tailscale-serve` adapter's header behaviour on Linux, and with a real non-owner tailnet identity.
 - A `local-tls` adapter (the relay on a non-loopback address behind its own certificate) is not implemented; the interface
   is built for it, and the listeners cannot be moved off loopback until it exists.

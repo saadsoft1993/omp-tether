@@ -2,5 +2,6 @@
 	"omp-session-control": { "commands": ["session-control"] },
 	"omp-services": { "commands": ["omp-services"] },
 	"omp-private-relay": { "extensions": false },
-	"omp-dashboard": { "extensions": false }
+	"omp-dashboard": { "extensions": false },
+	"omp-memory": { "extensions": false }
 }

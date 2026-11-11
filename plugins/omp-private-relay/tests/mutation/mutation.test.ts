@@ -1,4 +1,4 @@
-// Mutation check: each fix of the two reviews, and each guard of the pairing endpoint, is reverted in a COPY of the plugin,
+// Mutation check: each fix, and each guard of the pairing endpoint, is reverted in a COPY of the plugin,
 // and the regression tests must fail on that copy. A test that still passes with its guard deleted proves nothing.
 // Run with `make test-mutation` (each case runs two test files, so it takes a few minutes).
 import { describe, expect, test } from "bun:test";
@@ -7,7 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 const ROOT = path.resolve(import.meta.dir, "..", "..");
-const FILES = ["tests/unit/review-fixes.test.ts", "tests/unit/relay-token.test.ts", "tests/unit/config.test.ts", "tests/unit/web-asset.test.ts", "tests/unit/trustwalk.test.ts"];
+const FILES = ["tests/unit/regressions.test.ts", "tests/unit/relay-token.test.ts", "tests/unit/config.test.ts", "tests/unit/web-asset.test.ts", "tests/unit/trustwalk.test.ts"];
 
 /**
  * A mutated copy runs inside a sandbox the harness owns: <guard>/plugin (the copy) and <guard>/tmp (its TMPDIR, so every
@@ -83,8 +83,8 @@ function resolveTest(fragment: string): { file: string; title: string } {
 
 /** [name, file, text that must exist, text that replaces it, a fragment of a failing test name] */
 const MUTATIONS: Array<[string, string, string, string, string]> = [
-	["pairing: custom header not required", "src/relay.ts", 'req.headers.get("x-omp-relay") !== "1" ||', "", "tests/unit/review-fixes.test.ts|no custom header (a plain cross-site form post): refused"],
-	["pairing: Origin not required (neither the null check nor the match)", "src/relay.ts", "origin === null || !auth.origins().includes(origin)", "false", "tests/unit/review-fixes.test.ts|no Origin (plain requests with no Origin pass the identity layer, so only this check stops them): refused"],
+	["pairing: custom header not required", "src/relay.ts", 'req.headers.get("x-omp-relay") !== "1" ||', "", "tests/unit/regressions.test.ts|no custom header (a plain cross-site form post): refused"],
+	["pairing: Origin not required (neither the null check nor the match)", "src/relay.ts", "origin === null || !auth.origins().includes(origin)", "false", "tests/unit/regressions.test.ts|no Origin (plain requests with no Origin pass the identity layer, so only this check stops them): refused"],
 	["pairing: Content-Length not required (chunked accepted)", "src/relay.ts", 'if (req.headers.has("transfer-encoding") || lengthHeader === null) return json(411, { error: "a Content-Length is required" });', "", "without Content-Length"],
 	["pairing: budget not reserved before the awaits", "src/relay.ts", "pairFailures.length + pairInflight >= PAIR_FAILURES_PER_MINUTE", "pairFailures.length >= PAIR_FAILURES_PER_MINUTE", "stalled before their body arrives"],
 	["pairing: no failure budget at all", "src/relay.ts", "pairFailures.length + pairInflight >= PAIR_FAILURES_PER_MINUTE", "false", "ten wrong links"],
@@ -93,7 +93,7 @@ const MUTATIONS: Array<[string, string, string, string, string]> = [
 	["relay: port may be shared with a second relay", "src/relay.ts", "reusePort: false", "reusePort: true", "second start"],
 	["relay: check key published before the binds", "src/relay.ts", "const adapterRun = auth.start({", "writeCheckKey();\n\tconst adapterRun = auth.start({", "second start"],
 	["token adapter: Host not checked", "src/auth/token.ts", "!hosts.has(", "false && !hosts.has(", "tests/unit/relay-token.test.ts|GET / wrong Host (DNS rebinding)"],
-	["token adapter: proxy headers allowed", "src/auth/token.ts", "if (headers.has(name))", "if (false as boolean)", "tests/unit/review-fixes.test.ts|a proxy header: refused"],
+	["token adapter: proxy headers allowed", "src/auth/token.ts", "if (headers.has(name))", "if (false as boolean)", "tests/unit/regressions.test.ts|a proxy header: refused"],
 	["pair: no listener proof", "src/cli.ts", "if (!proof.ok) {\n\t\tio.err(`No link", "if (false as boolean) {\n\t\tio.err(`No link", "does not prove to be this relay"],
 	["pair: token made before the address is known", "src/cli.ts", "if (!auth.pairingLink(\"x\")) {", "await new PairingWriter(config.pairing.dir).createToken();\n\tif (!auth.pairingLink(\"x\")) {", "orphan token"],
 	["status: unproven listener believed", "src/cli.ts", "if (proven.ok) running = proven.stats;", "running = proven.ok ? proven.stats : { rooms: 99, guests: 99, ready: true };", "status does not trust"],
@@ -102,10 +102,10 @@ const MUTATIONS: Array<[string, string, string, string, string]> = [
 	["config: unsafe parent directory accepted", "src/config.ts", "if (parent.mode & 0o022 && !(parent.mode & 0o1000)) throw", "if (false as boolean) throw", "directory that others can write"],
 	["config: restart grace uncapped", "schemas/config-1.schema.json", '"maximum": 120000', '"maximum": 600000', "restartGraceMs above"],
 	["store: zero-byte file treated as empty", "src/pairing-store.ts", 'JSON.parse(fs.readFileSync(fd, "utf8")); // a zero-byte', 'JSON.parse(fs.readFileSync(fd, "utf8") || "{}"); // a zero-byte', "zero-byte"],
-	["store: loose lock file accepted", "src/pairing-store.ts", "if (fileProblem(st)) throw", "if (false as boolean) throw", "L4: an existing lock file that others can read or write is refused"],
+	["store: loose lock file accepted", "src/pairing-store.ts", "if (fileProblem(st)) throw", "if (false as boolean) throw", "an existing lock file that others can read or write is refused"],
 	["doctor: writer-side check of the store", "src/doctor.ts", "const view = new PairingReader(config.pairing.dir).read();", "const view = { refusal: null, hashes: new Set<string>() };", "doctor does not call"],
 	["web: http loopback allowed on any redirect hop", "src/web-asset.ts", 'allowHttp = first.protocol === "http:";', "allowHttp = true;", "only as the starting URL"],
-	["web: NOTICE not checked against its pin", "src/web-asset.ts", "if (!notice || sha256(notice) !== build.noticeSha256)", "if (false as boolean)", "F7: an archive whose content matches but whose NOTICE differs from its pin is refused"],
+	["web: NOTICE not checked against its pin", "src/web-asset.ts", "if (!notice || sha256(notice) !== build.noticeSha256)", "if (false as boolean)", "an archive whose content matches but whose NOTICE differs from its pin is refused"],
 	["dropins: service not pinned to the config file", "src/dropins.ts", "env: pinnedEnv(env),", "env: {},", "both the service and the proof command carry the absolute config path"],
 	["dropins: foreign directory chmod-ed", "src/dropins.ts", "{ tighten: false }", "{}", "belongs to another tool"],
 	["served path: group-writable parent accepted", "src/fsutil.ts", "if (st.mode & 0o022) throw new UnsafePathError(`${dir} is writable by group or others`);", "if (st.mode & 0o002) throw new UnsafePathError(`${dir} is writable by group or others`);", "group-writable parent is refused"],

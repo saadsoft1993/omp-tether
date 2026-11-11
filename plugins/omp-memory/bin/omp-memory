@@ -1,0 +1,55 @@
+#!/bin/sh
+# Finds a Python 3.10 or newer and runs omp-memory with it: the first of python3.14 ... python3.10 and python3 that is
+# recent enough, on PATH and in the usual places. Bun (1.4.4 or newer, for the importer) is looked for by omp-memory itself,
+# only by the commands that need it; `omp-memory doctor` says what is missing.
+#
+# OMP_MEMORY_PYTHON=/absolute/path/to/python3 forces an interpreter. Nothing here installs or changes anything.
+set -u
+
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink "$self" 2>/dev/null) || exit 2
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname "$self")/$target ;;
+  esac
+done
+here=$(cd "$(dirname "$self")" 2>/dev/null && pwd -P) || exit 2
+main="$here/../python/omp_memory_main.py"
+# What this launcher prints is fixed text: never a path, an interpreter name or a value the caller gave (it could carry a secret).
+[ -f "$main" ] || { echo "omp-memory: the plugin installation is incomplete" >&2; exit 2; }
+
+recent() {
+  "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+}
+
+if [ -n "${OMP_MEMORY_PYTHON:-}" ]; then
+  case $OMP_MEMORY_PYTHON in
+    /*) ;;
+    *) echo "omp-memory: OMP_MEMORY_PYTHON is not a usable interpreter (it must be an absolute path to Python 3.10 or newer)" >&2; exit 2 ;;
+  esac
+  recent "$OMP_MEMORY_PYTHON" || { echo "omp-memory: OMP_MEMORY_PYTHON is not a usable interpreter (it must be an absolute path to Python 3.10 or newer)" >&2; exit 2; }
+  exec "$OMP_MEMORY_PYTHON" "$main" "$@"
+fi
+
+for dir in "" /opt/homebrew/bin /usr/local/bin "${HOME:-/nonexistent}/.local/bin"; do
+  for name in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+    if [ -z "$dir" ]; then
+      py=$(command -v "$name" 2>/dev/null) || continue
+    else
+      py=$dir/$name
+      [ -x "$py" ] || continue
+    fi
+    case $py in /*) ;; *) continue ;; esac
+    if recent "$py"; then
+      exec "$py" "$main" "$@"
+    fi
+  done
+done
+
+cat >&2 <<'EOF'
+omp-memory needs Python 3.10 or newer, and none was found.
+Install one (Homebrew: brew install python; Ubuntu: apt install python3; or uv, python.org) and run this again,
+or set OMP_MEMORY_PYTHON to its absolute path. On macOS, /usr/bin/python3 is 3.9 and too old.
+EOF
+exit 2

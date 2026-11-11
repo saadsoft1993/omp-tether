@@ -11,6 +11,9 @@ Checks, for a git repository:
      identity is on the identity allowlist;
   4. submodule entries and unsupported file modes fail.
 Findings show the rule and the location but not the matched text, unless --show-matches is given.
+The process-narrative rule (how the work was reviewed or fixed, where the project came from) is checked in the
+candidate tree and in commit, tag and ref text. Older file versions in the history are NOT checked against it; the
+other content rules do cover every file version.
 
 Exit codes: 0 clean, 1 findings, 2 usage or configuration error.
 Standard library only (Python 3.10+).
@@ -44,7 +47,7 @@ _GENERATED = "Gener" + "ated (?:with|by)"
 _ROBOT = "\U0001f916"
 
 # Phrases that reveal how work or reviews were done. Public files say what a thing is and does, never who or what wrote
-# or reviewed it ("independent security review" is fine). Assembled from fragments so this file passes its own check.
+# or reviewed it. Assembled from fragments so this file passes its own check.
 _PROVENANCE = [
     r"\bmodel" + r" famil",
     r"\bdifferent" + r" model",
@@ -95,6 +98,59 @@ class Rule:
     why: str
 
 
+# Public text says what the software is, does and what was tested. It does not tell how the work was reviewed or fixed,
+# where the project came from, or what was found along the way. The rule applies to every path of the candidate tree and
+# to commit and ref text. Assembled from fragments so this file passes its own check.
+_NARRATIVE_REVIEW = [
+    r"independent (?:static |security |code )?" + "review" + r"s?",
+    "second " + "review" + r"ers?",
+    r"failing[- ]first",
+    r"re-?" + "review" + "ed",
+    r"fixed (?:after|with|by|in) (?:the |a |an )?" + "review" + r"s?",
+    r"findings? (?:were|are) fixed",
+    "review" + r" findings?",
+]
+_NARRATIVE_ORIGIN = [
+    "pre" + "decessor",
+    "pre" + "cursor",
+    "general" + r"i[sz](?:e[sd]?|ing)",
+    "grew " + "out of",
+    "original" + r"ly (?:built|written|made)",
+    r"first (?:design|version) (?:was|of this)",
+    "an earlier " + r"(?:tool|version|design) (?:of|that|had)",
+    "ran for " + "one person",
+    "before this " + "plugin",
+    "came from an? " + r"(?:relay|hub|tool)",
+]
+_NARRATIVE_PROCESS = [
+    "written" + r" with\b",
+    "we " + "found",
+    "was " + r"found (?:in|by)",
+    r"after (?:an? |the )?(?:" + "review" + "|audit|testing found)",
+    r"fixed (?:while|during|after)",
+    r"regression (?:for|of) (?:an? |the )?bug",
+    r"(?-i:\b[FHML]\d{1,2}/[FHML]\d{1,2}\b)",
+    r"\bfindings? [FHML]?\d",
+    "second " + "round",
+    "first " + "round",
+    "previous " + "round",
+    "this " + r"round(?![- ]?trip)",
+    "in a later " + "round",
+    "earlier " + r"(?:debugging|bug|failure|version|round)",
+]
+# Finding ids that label a test or a comment. A bare id is not enough (protocol checks such as `M1` are ids too): only
+# an id in parentheses, an id that opens a test title, or an R-id followed by a word of a review log.
+_NARRATIVE_IDS = [
+    r"\((?-i:[FHMLR]\d{1,2})\)",
+    r"""\b(?:test|it|describe)\(\s*["'`](?-i:[FHMLR]\d{1,2})[:)]""",
+    r"(?-i:\bR\d{1,2})\s+(?:second|round|fix|finding|review)",
+]
+_NARRATIVE = re.compile(
+    r"\b(?:" + "|".join(_NARRATIVE_REVIEW + _NARRATIVE_ORIGIN + _NARRATIVE_PROCESS) + r")|" + "|".join(_NARRATIVE_IDS),
+    re.I,
+)
+
+
 def build_rules(private_terms: list[str]) -> list[Rule]:
     names = "|".join(_NAMES)
     rules = [
@@ -112,6 +168,7 @@ def build_rules(private_terms: list[str]) -> list[Rule]:
         Rule("tailnet-host", re.compile(r"\b(?:[a-z0-9-]+\.)+ts\.net\b", re.I), "fail", "Tailscale MagicDNS host"),
         Rule("home-path", re.compile(r"/Users/(?!Shared\b)[A-Za-z0-9._-]+"), "fail", "absolute macOS home path"),
         Rule("agent-word", re.compile(r"\bagents?\b", re.I), "warn", "the word 'agent' (check context)"),
+        Rule("process-narrative", _NARRATIVE, "fail", "describes how the work or its reviews were done"),
     ]
     for term in private_terms:
         rules.append(Rule("private-term", re.compile(term, re.I), "fail", "private term list"))
@@ -318,7 +375,7 @@ def scan_blob(
             report.fail(
                 where,
                 "binary-blob",
-                "this file is binary or not UTF-8, so its content cannot be checked; list it in --binary-allow after review",
+                "this file is binary or not UTF-8, so its content cannot be checked; list it in --binary-allow once it is checked",
             )
         return
     scan_text(report, where, text, rules, emails)
@@ -378,12 +435,16 @@ def main(argv: list[str] | None = None) -> int:
     paths_seen: set[str] = set()
 
     def check_entries(where: str, entries: list[Entry]) -> None:
+        # only the candidate tree is held to the narrative rule
+        def rules_here(path: str) -> list[Rule]:
+            return [r for r in rules_for(path) if where == "HEAD" or r.rule_id != "process-narrative"]
+
         for e in entries:
-            shown = shown_name(report, e.path, rules_for(e.path), emails)
+            shown = shown_name(report, e.path, rules_here(e.path), emails)
             if e.path not in paths_seen:
                 paths_seen.add(e.path)
                 check_path(report, f"{where}", e.path, allow, deny, shown)
-                scan_path_string(report, where, e.path, rules_for(e.path), emails)
+                scan_path_string(report, where, e.path, rules_here(e.path), emails)
             if e.kind == "commit" or e.mode == "160000":
                 report.fail(where, "unsupported-entry", f"{shown} is a submodule entry, which is not published")
                 continue
@@ -393,12 +454,12 @@ def main(argv: list[str] | None = None) -> int:
             if e.mode not in ("100644", "100755", "120000"):
                 report.fail(where, "unsupported-entry", f"{shown} has unsupported mode {e.mode}")
                 continue
-            skipped = frozenset(r.rule_id for r in rules if r not in rules_for(e.path))
+            skipped = frozenset(r.rule_id for r in rules if r not in rules_here(e.path))
             key = (e.sha, skipped)
             if key in scanned:
                 continue
             scanned.add(key)
-            scan_blob(report, f"{where}:{shown}", e.path, reader.read(e.sha), rules_for(e.path), emails, binary_ok)
+            scan_blob(report, f"{where}:{shown}", e.path, reader.read(e.sha), rules_here(e.path), emails, binary_ok)
 
     # 1 and 2: the candidate commit's tree, read from the commit (never the index) with every entry's recorded mode
     head_entries = ls_tree(args.repo, candidate)

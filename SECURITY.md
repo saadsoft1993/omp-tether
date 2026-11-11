@@ -1,6 +1,6 @@
 # Security policy
 
-This repository holds small tools that let you reach your own omp sessions from other places on your own machines. Each
+This repository holds small tools that let you reach your own omp sessions from other places on your own machines, and a command line for omp's local memory. Each
 plugin has its own policy and threat model next to its code:
 
 - [`plugins/omp-session-control/SECURITY.md`](plugins/omp-session-control/SECURITY.md) and
@@ -11,6 +11,8 @@ plugin has its own policy and threat model next to its code:
   [`plugins/omp-private-relay/docs/threat-model.md`](plugins/omp-private-relay/docs/threat-model.md)
 - [`plugins/omp-dashboard/SECURITY.md`](plugins/omp-dashboard/SECURITY.md) and
   [`plugins/omp-dashboard/docs/threat-model.md`](plugins/omp-dashboard/docs/threat-model.md)
+- [`plugins/omp-memory/SECURITY.md`](plugins/omp-memory/SECURITY.md) and
+  [`plugins/omp-memory/docs/threat-model.md`](plugins/omp-memory/docs/threat-model.md)
 
 ## Reporting a vulnerability
 

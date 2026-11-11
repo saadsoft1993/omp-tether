@@ -16,6 +16,7 @@ body:
         - omp-services
         - omp-private-relay
         - omp-dashboard
+        - omp-memory
         - Repository tooling (Makefile, tests, gate)
     validations:
       required: true
@@ -60,5 +61,5 @@ body:
     id: output
     attributes:
       label: Output
-      description: Command output or log lines (for example `omp-services doctor`). Remove anything private first.
+      description: Command output or log lines (for example `omp-services doctor` or `omp-memory doctor`). Remove anything private first; for omp-memory, never paste memory text, bank files, backups or the ledger.
       render: text

@@ -3,7 +3,7 @@
 For people deciding whether to run it, and for people reviewing it. Plain language. The protocols are in
 [`health-1.md`](../../../docs/protocol/health-1.md) and [`services-1.md`](../../../docs/protocol/services-1.md).
 
-Status: independent security reviews have been done and their findings fixed; no external penetration test has been done. The "accepted" items are the author's judgement: the command line is
+Status: beta; no external penetration test has been done. The "accepted" items are the author's judgement: the command line is
 standard-library Python and the extension is one short file, so both can be read in a sitting.
 
 ## What it is, and what it can do

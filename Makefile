@@ -11,20 +11,21 @@ SERVICES := plugins/omp-services
 SERVICES_UNIT_TESTS := $(wildcard $(SERVICES)/tests/unit/*.test.ts)
 RELAY := plugins/omp-private-relay
 DASH := plugins/omp-dashboard
+MEMORY := plugins/omp-memory
 UI_BUN := $(or $(BUN_BIN),bun)
 # The omp checkout the relay's web client is built from (at a release tag); OMP_SRC is the checkout whose types are used by typecheck.
 WEB_OMP_SRC ?= $(OMP_SRC)
-SHELL_SCRIPTS := $(RELAY)/bin/omp-private-relay $(wildcard $(RELAY)/scripts/*.sh) $(SERVICES)/bin/omp-services $(SERVICES)/install.sh $(DASH)/bin/omp-dashboard scripts/*.sh tools/public-tree-check/*.sh
+SHELL_SCRIPTS := $(RELAY)/bin/omp-private-relay $(wildcard $(RELAY)/scripts/*.sh) $(SERVICES)/bin/omp-services $(SERVICES)/install.sh $(DASH)/bin/omp-dashboard $(MEMORY)/bin/omp-memory $(MEMORY)/scripts/*.sh scripts/*.sh tools/public-tree-check/*.sh
 
 
-.PHONY: test-dashboard test-dashboard-mutation test-dashboard-conformance test-ui ui-install build-ui verify-ui typecheck-ui help check check-contrib test test-unit test-tools test-services test-relay test-mutation test-conformance test-integration gate gate-selftest lint lint-shell shellcheck typecheck release-check release-check-core release-check-relay verify-web export-gate public-check public-selftest bun-version
+.PHONY: test-memory memory-vendor-check test-dashboard test-dashboard-mutation test-dashboard-conformance test-ui ui-install build-ui verify-ui typecheck-ui help check check-contrib test test-unit test-tools test-services test-relay test-mutation test-conformance test-integration gate gate-selftest lint lint-shell shellcheck typecheck release-check release-check-core release-check-relay verify-web export-gate public-check public-selftest bun-version
 
 help:
 	@echo "make check             everything below, in order (check-contrib, then the maintainer's publication gate)"
 	@echo "make check-contrib     everything except the publication gate: what a contributor runs before a pull request"
 	@echo "make test-unit         unit suite, conformance suite against the extension, crash tests (no omp needed)"
 	@echo "make test-relay        omp-private-relay: real relay processes on free ports, fake omp, no network (no omp needed)"
-	@echo "make test-mutation     revert each fix of the reviews in a copy of omp-private-relay: its tests must fail on every copy"
+	@echo "make test-mutation     revert each guard in a copy of omp-private-relay: its tests must fail on every copy"
 	@echo "make release-check     the publishing gate: release-check-core (check with the type check required, then export-gate) and release-check-relay"
 	@echo "make release-check-relay  verify-web plus the relay suite with the archive and omp-services schemas required (WEB_OMP_SRC OMP_TAG ASSET SERVICES_SCHEMAS; WEB_OMP_SRC defaults to OMP_SRC)"
 	@echo "make verify-web        rebuild the relay web client from an omp tag and compare with its pin (WEB_OMP_SRC=<checkout> OMP_TAG=vX.Y.Z; needs network once)"
@@ -39,13 +40,15 @@ help:
 	@echo "make public-check      allowlist, identity, wording and secret checks on the tree and a fresh export"
 	@echo "make public-selftest   check the checker"
 	@echo "make test-services     omp-services: extension unit tests, Python suite, health/1 conformance suite and its self-test"
+	@echo "make test-memory      omp-memory: the bundled importer's Bun tests from the plugin copy (installs the npm library into a scratch dir once), the Python suite, and the vendor drift check"
+	@echo "make memory-vendor-check  compare plugins/omp-memory/vendor with the source tree it was copied from (OMP_MEMORY_SOURCE_DIR; skipped when unset)"
 	@echo "make shellcheck        alias of lint-shell"
 
 check: check-contrib public-check
 
 # Everything except the publication gate. The gate (public-check) requires every commit to carry the maintainer's identity and
 # a clean working tree, so the maintainer runs it before a release; contributors run check-contrib.
-check-contrib: bun-version lint $(if $(OMP_SRC),typecheck) test-unit test-relay test-mutation test-conformance test-dashboard test-dashboard-conformance test-dashboard-mutation test-ui verify-ui typecheck-ui test-tools test-services test-integration gate gate-selftest public-selftest
+check-contrib: bun-version lint $(if $(OMP_SRC),typecheck) test-unit test-relay test-mutation test-conformance test-dashboard test-dashboard-conformance test-dashboard-mutation test-memory test-ui verify-ui typecheck-ui test-tools test-services test-integration gate gate-selftest public-selftest
 
 test: test-unit
 
@@ -175,3 +178,17 @@ verify-ui:
 # Each security guard of the dashboard is switched off in a copy; the test module that guards it must fail.
 test-dashboard-mutation:
 	$(PYTHON) $(DASH)/tests/mutation/run_mutations.py
+
+# omp-memory: the importer's own Bun tests, run from the plugin's copy (they build scratch banks with the published Mnemopi
+# library, @oh-my-pi/pi-mnemopi at omp's version, which the first run installs into a scratch directory: network once), then the
+# Python suite (scratch HOME, fake banks, no omp needed; the drift test against the source tree is skipped with a message when
+# that checkout is not named). Point BUN_BIN at the Bun 1.4.4 or newer to use.
+test-memory: bun-version
+	@scratch=$$(mktemp -d "$${TMPDIR:-/tmp}/omp-memory-test-home.XXXXXX") && trap 'rm -rf "$$scratch"' EXIT && \
+	  (cd $(MEMORY)/vendor/memory_import && HOME="$$scratch" $(BUN) test) && \
+	  (cd $(MEMORY)/tests/python && HOME="$$scratch" $(PYTHON) -m unittest discover -p 'test_*.py' -v)
+
+memory-vendor-check:
+	@d="$$OMP_MEMORY_SOURCE_DIR"; \
+	if [ -n "$$d" ] && [ -d "$$d" ]; then $(MEMORY)/scripts/sync-vendor.sh --check; \
+	else echo "skipped: OMP_MEMORY_SOURCE_DIR does not name the source tree (set it to compare)"; fi

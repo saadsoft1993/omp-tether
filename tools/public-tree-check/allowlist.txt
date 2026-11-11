@@ -30,6 +30,8 @@ plugins/*/schemas/**
 plugins/*/patches/**
 plugins/*/scripts/**
 plugins/*/web-builds.json
+plugins/*/skills/**
+plugins/*/vendor/**
 scripts/**
 tools/public-tree-check/**
 tools/extension-load-gate/**

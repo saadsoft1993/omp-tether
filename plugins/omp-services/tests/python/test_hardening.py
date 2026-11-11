@@ -1,4 +1,4 @@
-"""Regression tests for the findings of the two independent reviews. Each test failed on commit ce7348e."""
+"""Regression tests: input validation, state files, locks, drop-ins, doctor checks and the installer."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ class Base(support.Case):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F1Adoption(Base):
+class AdoptionCases(Base):
     def test_init_does_not_mark_an_existing_directory_and_purge_deletes_only_what_init_created_in_it(self):
         # the README flow: another plugin's `dropins --write` created the configuration directory first
         self.s.config_dir.mkdir(parents=True)
@@ -110,7 +110,7 @@ class F1Adoption(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F2UnitOwnership(Base):
+class UnitOwnershipCases(Base):
     def test_a_path_in_state_json_is_never_used(self):
         self.s.services("plug", HUB)
         self.init()
@@ -171,7 +171,7 @@ class F2UnitOwnership(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F3Uninstall(Base):
+class UninstallCases(Base):
     def test_a_symlinked_releases_directory_is_refused(self):
         self.init()
         victim = self.s.root / "victim"
@@ -206,7 +206,7 @@ class F3Uninstall(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F4Protected(Base):
+class ProtectedCases(Base):
     def test_allow_protected_no_longer_exists(self):
         path = self.s.health(
             "plug", {"id": "w", "type": "watchdog", "service": "hub", "restart": {"allowProtected": True}}
@@ -250,7 +250,7 @@ class F4Protected(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F5PlanDigest(Base):
+class PlanDigestCases(Base):
     def test_plan_json_carries_the_whole_plan_and_a_digest(self):
         rc, out, err = self.s.cli("init", "--plan", "--json")
         self.assertEqual(rc, 0, err)
@@ -286,7 +286,7 @@ class F5PlanDigest(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F6Installer(Base):
+class InstallerCases(Base):
     def run_script(self, extra):
         return subprocess.run(
             ["/bin/sh", str(support.PLUGIN / "install.sh")],
@@ -327,7 +327,7 @@ class F6Installer(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F7Newline(Base):
+class NewlineCases(Base):
     def test_schema_patterns_refuse_a_trailing_newline(self):
         doc = {
             "protocol": "services/1",
@@ -360,7 +360,7 @@ class F7Newline(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F8Deadlines(Base):
+class DeadlinesCases(Base):
     def test_file_age_obeys_its_deadline(self):
         import glob as globmod
 
@@ -443,7 +443,7 @@ class F8Deadlines(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F9Trust(Base):
+class TrustCases(Base):
     def test_a_group_writable_config_file_is_refused(self):
         self.s.write_config(heartbeat={"enabled": False})
         os.chmod(self.s.config_dir / "config.json", 0o666)
@@ -521,7 +521,7 @@ class F9Trust(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F10Lock(Base):
+class LockCases(Base):
     def test_a_mutating_command_refuses_to_run_twice_at_once(self):
         import fcntl
 
@@ -537,11 +537,11 @@ class F10Lock(Base):
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# release integrity; F12/A-M5: quoting; F13/A-M1: descendants; F14/A-M11: logs
+# release integrity, quoting, descendants, logs
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F11Release(Base):
+class ReleaseCases(Base):
     def test_a_release_directory_that_does_not_match_its_name_is_not_reused(self):
         self.init()
         release = self.s.data_dir / "releases" / self.state()["release"]
@@ -563,7 +563,7 @@ class F11Release(Base):
         self.assertEqual(rc, 2)
 
 
-class F12Systemd(Base):
+class SystemdCases(Base):
     kind = "systemd"
 
     def test_environment_values_keep_their_dollar_signs(self):
@@ -589,7 +589,7 @@ class F12Systemd(Base):
                 paths_mod.from_env({"HOME": "/h", name: "/x\n[Service]\nExecStart=/bin/evil"}, "linux")
 
 
-class F13Descendants(Base):
+class DescendantsCases(Base):
     def test_a_grandchild_of_a_command_that_exits_is_killed_too(self):
         marker = self.s.root / "survived"
         child = self.s.root / "gc.py"
@@ -622,7 +622,7 @@ class F13Descendants(Base):
         self.assertFalse(marker.exists(), "the command's process group did not outlive the command line")
 
 
-class F14Logs(Base):
+class LogsCases(Base):
     def test_rotation_streams_and_keeps_at_most_max_bytes(self):
         logs = self.s.state_dir / "logs"
         logs.mkdir(parents=True)
@@ -659,7 +659,7 @@ class F14Logs(Base):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-class F15Heartbeat(Base):
+class HeartbeatCases(Base):
     def setUp(self):
         super().setUp()
         self.certs = support.make_certs(self.s.root)
@@ -756,10 +756,10 @@ class F15Heartbeat(Base):
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# # ---------------------------------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------------------------------
 
 
-class F16Doctor(Base):
+class DoctorCases(Base):
     def test_doctor_names_what_each_drop_in_makes_the_machine_run(self):
         self.s.services("plug", {"name": "hub", "program": {"type": "exec", "argv": ["/usr/bin/true", "--secretish"]}})
         self.s.health("plug", {"id": "c", "type": "command", "argv": ["/bin/echo", "hi"]})
@@ -783,7 +783,7 @@ class F16Doctor(Base):
         self.assertEqual(self.s.restarts(), [])
 
 
-class AM3PinnedOmp(Base):
+class PinnedOmpCases(Base):
     def test_watchdogs_resolve_omp_script_services_through_the_pinned_omp(self):
         script = self.s.root / "hub.ts"
         script.write_text("x")
@@ -798,7 +798,7 @@ class AM3PinnedOmp(Base):
         self.assertNotEqual(result["reason"], "unknown-service")
 
 
-class AM4CarriedEnvironment(Base):
+class CarriedEnvironmentCases(Base):
     def test_units_carry_the_resolved_roots_and_effective_overrides(self):
         base = self.s.root / "xdg"
         env = {"XDG_CONFIG_HOME": str(base / "c"), "XDG_DATA_HOME": str(base / "d"), "XDG_STATE_HOME": str(base / "s")}
@@ -814,7 +814,7 @@ class AM4CarriedEnvironment(Base):
         self.assertIn("OMP_SERVICES_LABEL_PREFIX=osvtest", out)
 
 
-class AM6SystemdState(Base):
+class SystemdStateCases(Base):
     kind = "systemd"
 
     def manager(self):
@@ -840,7 +840,7 @@ class AM6SystemdState(Base):
         self.assertTrue(self.unit_file("osvtest.plug.hub").exists(), "not deleted while it may still run")
 
 
-class AM7HealthDefaults(Base):
+class HealthDefaultsCases(Base):
     def test_the_health_command_never_restarts_anything(self):
         self.s.services("plug", HUB)
         self.s.health("plug", {"id": "w", "type": "watchdog", "service": "hub", "restart": {}})
@@ -852,7 +852,7 @@ class AM7HealthDefaults(Base):
         self.assertEqual(self.s.restarts(), [])
 
 
-class AM8Reasons(Base):
+class ReasonsCases(Base):
     def test_an_invalid_drop_in_result_carries_a_fixed_code_not_paths_or_field_names(self):
         key = "key-" + os.urandom(6).hex()
         path = self.s.dropin(
@@ -869,14 +869,14 @@ class AM8Reasons(Base):
         self.assertTrue(all(str(self.s.root) not in json.dumps(r.as_dict()) for r in results))
 
 
-class AM15Packaging(unittest.TestCase):
+class PackagingCases(unittest.TestCase):
     def test_there_is_no_pip_install_route_that_cannot_work(self):
         self.assertFalse((support.PLUGIN / "pyproject.toml").exists())
         readme = (support.PLUGIN / "README.md").read_text()
         self.assertNotIn("uv tool install", readme + (support.PLUGIN / "CHANGELOG.md").read_text())
 
 
-class L2Docs(unittest.TestCase):
+class DocsCases(unittest.TestCase):
     def read(self, rel):
         return (support.PLUGIN / rel).read_text()
 

@@ -28,6 +28,6 @@ The latest release only, while the version is below 1.0.
 
 ## What is not claimed
 
-Independent security reviews have been done; a certification or an external penetration test has not. The threat model lists what is defended against and what is accepted. The Tailscale
+It is not certified and has had no external penetration test. The threat model lists what is defended against and what is accepted. The Tailscale
 Serve route check was written against the documented JSON shape of `tailscale serve status --json` and has not been run
 against a real tailnet.

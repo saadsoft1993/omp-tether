@@ -150,7 +150,7 @@ describe("pairing a browser with a one-time link", () => {
 		expect((await redeem(token)).status).toBe(403);
 	});
 
-	// The guards (custom header, Origin, Host, proxy headers, framing) are tested with REAL tokens in review-fixes.test.ts: a
+	// The guards (custom header, Origin, Host, proxy headers, framing) are tested with REAL tokens in regressions.test.ts: a
 	// refusal of an unknown token would pass even without the guard. What stays here needs no token.
 	test("a body that is not JSON, and a token of the wrong type, are refused", async () => {
 		expect((await redeem(null, {}, "{nope")).status).toBe(400);

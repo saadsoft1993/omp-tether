@@ -1,5 +1,4 @@
-"""Regression tests for the independent reviews of 0.1.0 (omp-dashboard-review.md F1-F14 and the second review's H1-L4), each written
-before its fix and run against the code as it was: every test here failed then."""
+"""Regression tests: restart, trust walk, kill timing, duplicate headers, pairing budget and expiry, ntfy topics, request contract, ACLs, bounded reads, paths, enumeration, environment."""
 
 from __future__ import annotations
 
@@ -58,10 +57,10 @@ class Tmp(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, True)
 
 
-# F1 ---------------------------------------------------------------------------------------------------------------------------
+# hub restart ------------------------------------------------------------------------------------------------------------------
 
 
-class F1Restart(ScratchTestCase):
+class HubRestart(ScratchTestCase):
     def test_a_hub_that_just_stopped_can_be_started_again_on_the_same_port_at_once(self) -> None:
         s = self.make()
         first = InProcessHub(s)
@@ -88,10 +87,10 @@ class F1Restart(ScratchTestCase):
         self.assertNotIn("allow_reuse_port", text)
 
 
-# F3 / H1 trust walk ---------------------------------------------------------------------------------------------------------------
+# trust walk -----------------------------------------------------------------------------------------------------------------------
 
 
-class F3Groups(Tmp):
+class GroupWritableDirectories(Tmp):
     def test_a_group_writable_directory_is_accepted_only_for_a_group_with_no_other_member(self) -> None:
         d = self.root / "g"
         d.mkdir()
@@ -163,7 +162,7 @@ class F3Groups(Tmp):
 
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS ACLs")
-class H1InheritedAcls(Tmp):
+class InheritedAcls(Tmp):
     def test_an_inherited_write_grant_on_a_file_is_refused_after_its_source_is_gone(self) -> None:
         parent = self.root / "p"
         parent.mkdir(mode=0o700)
@@ -217,10 +216,10 @@ class H1InheritedAcls(Tmp):
             check_path(d / "x")
 
 
-# F4 ---------------------------------------------------------------------------------------------------------------------------------
+# kill group timing ------------------------------------------------------------------------------------------------------------------
 
 
-class F4Killpg(unittest.TestCase):
+class KillGroupTiming(unittest.TestCase):
     def test_the_group_is_signalled_only_at_the_deadline_never_after_the_child_exited_and_was_reaped(self) -> None:
         calls: list[int] = []
         real = os.killpg
@@ -248,10 +247,10 @@ class F4Killpg(unittest.TestCase):
             os.kill(pid, 9)
 
 
-# F5 tailscale duplicate headers --------------------------------------------------------------------------------------------------
+# tailscale duplicate headers -----------------------------------------------------------------------------------------------------
 
 
-class F5Duplicates(ScratchTestCase):
+class DuplicateHeaders(ScratchTestCase):
     def setUp(self) -> None:
         self.s = self.make()
         ts = tailscale_script(self.s.bin)
@@ -288,10 +287,10 @@ class F5Duplicates(ScratchTestCase):
         self.assertEqual(a.check(H(headers)).status, 403)
 
 
-# F6 pairing budget ------------------------------------------------------------------------------------------------------------------
+# pairing budget ---------------------------------------------------------------------------------------------------------------------
 
 
-class F6Budget(ScratchTestCase):
+class PairingBudget(ScratchTestCase):
     def test_a_valid_link_still_works_while_wrong_guesses_are_being_refused(self) -> None:
         s = self.make()
         hub = self.hub(s)
@@ -317,10 +316,10 @@ class F6Budget(ScratchTestCase):
         self.assertEqual(Client(s.port).post("/api/hub/pair", {"token": token}).status, 429)
 
 
-# F7 -----------------------------------------------------------------------------------------------------------------------------------
+# pairing expiry -----------------------------------------------------------------------------------------------------------------------
 
 
-class F7Expiry(ScratchTestCase):
+class PairingExpiry(ScratchTestCase):
     def test_a_browser_older_than_the_configured_age_is_no_longer_paired(self) -> None:
         s = self.make()
         s.write_config({"pairing": {"maxAgeDays": 30}})
@@ -362,10 +361,10 @@ class F7Expiry(ScratchTestCase):
         self.assertTrue(w.redeem(token, "x"))
 
 
-# F8 / F9 -----------------------------------------------------------------------------------------------------------------------------
+# ntfy topic and payloads -------------------------------------------------------------------------------------------------------------
 
 
-class F8Topic(ScratchTestCase):
+class NtfyTopic(ScratchTestCase):
     def test_a_supplied_topic_must_be_long_and_never_comes_from_the_command_line(self) -> None:
         s = self.make()
         self.assertEqual(
@@ -390,16 +389,16 @@ class F8Topic(ScratchTestCase):
             alerts.read_topic(f)
 
 
-class F9Payload(unittest.TestCase):
+class ReplyPayload(unittest.TestCase):
     def test_the_payload_has_no_tags_at_all(self) -> None:
         self.assertNotIn("tags", alerts.ntfy_payload("t" * 16, "T", "B"))
         self.assertNotIn("robot", json.dumps(alerts.ntfy_payload("t" * 16, "T", "B")))
 
 
-# F10 / L3 -----------------------------------------------------------------------------------------------------------------------------
+# request contract ---------------------------------------------------------------------------------------------------------------------
 
 
-class F10Contract(ScratchTestCase):
+class PostContract(ScratchTestCase):
     def setUp(self) -> None:
         self.s = self.make([host_entry(1)])
         self.hub_ = self.hub(self.s)
@@ -453,10 +452,10 @@ class F10Contract(ScratchTestCase):
         self.assertIn('"action": "revoke"', (s.root / "audit.jsonl").read_text())
 
 
-# F11 / F12 / F13 / F14 -----------------------------------------------------------------------------------------------------------
+# names, replies, tmux ------------------------------------------------------------------------------------------------------------
 
 
-class F11Names(unittest.TestCase):
+class PrintableNames(unittest.TestCase):
     def test_bidi_and_invisible_format_characters_are_stripped_from_names(self) -> None:
         self.assertEqual(printable("prod\u202eved\u200b\ufeff\u2066x"), "prodvedx")
         self.assertEqual(printable("normal é ✓"), "normal é ✓")
@@ -468,7 +467,7 @@ class F11Names(unittest.TestCase):
         self.assertEqual((h["sessionName"], h["cwd"]), ("readme", "/a/bc"))
 
 
-class F12Replies(Tmp):
+class RefusalReplies(Tmp):
     def test_a_refusal_code_must_be_a_short_lowercase_word_and_a_result_only_has_the_known_keys(self) -> None:
         from test_control import SESSION, ControlCase, FakeExtension
 
@@ -509,7 +508,7 @@ class F12Replies(Tmp):
             case.doCleanups()
 
 
-class F14Tmux(unittest.TestCase):
+class TmuxStart(unittest.TestCase):
     def test_tmux_formats_and_separators_in_a_folder_name_are_neutralised(self) -> None:
         d = Path(tempfile.mkdtemp(prefix="odq", dir="/tmp"))
         self.addCleanup(shutil.rmtree, d, True)
@@ -531,7 +530,7 @@ class F14Tmux(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed here")
-class L1RealTmux(Tmp):
+class RealTmux(Tmp):
     def test_a_folder_with_a_format_in_its_name_is_the_directory_the_window_opens_in(self) -> None:
         stub = self.root / "stub"
         stub.mkdir()
@@ -556,11 +555,11 @@ class L1RealTmux(Tmp):
         self.assertEqual(os.path.realpath((self.root / "cwd").read_text().strip()), os.path.realpath(folder))
 
 
-# H2 / M1 / M3 ---------------------------------------------------------------------------------------------------------------------------
+# file modes, ACLs and writers -----------------------------------------------------------------------------------------------------------
 
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS ACLs")
-class H2PairingAcl(Tmp):
+class PairingAcl(Tmp):
     def test_a_write_acl_on_devices_json_means_nobody_is_paired(self) -> None:
         store = PairingStore(self.root / "store", "c")
         session = store.writer.redeem(store.writer.create_token(), "x")
@@ -580,7 +579,7 @@ class H2PairingAcl(Tmp):
             PairingWriter(self.root / "store").devices()  # the writer refuses it too, not only the reader
 
 
-class H2Leaves(Tmp):
+class LeafFiles(Tmp):
     def test_the_walk_covers_the_files_and_not_only_the_directory(self) -> None:
         store = PairingStore(self.root / "store", "c")
         store.writer.redeem(store.writer.create_token(), "x")
@@ -599,7 +598,7 @@ class H2Leaves(Tmp):
         self.assertTrue({"devices.json", "pending.json"} <= names, names)
 
 
-class M1Writers(Tmp):
+class WriterParents(Tmp):
     def loose(self) -> Path:
         d = self.root / "loose"
         if not d.exists():
@@ -631,7 +630,7 @@ class M1Writers(Tmp):
         self.assertFalse((loose / "cfg").exists())
 
 
-class M1Parents(Tmp):
+class ParentDirectories(Tmp):
     def test_directories_created_above_a_private_directory_are_private_whatever_the_umask(self) -> None:
         old = os.umask(0o002)
         try:
@@ -642,7 +641,7 @@ class M1Parents(Tmp):
             self.assertEqual(stat.S_IMODE(os.stat(self.root / part).st_mode), 0o700, part)
 
 
-class M3AuditFifo(Tmp):
+class AuditFifo(Tmp):
     def test_a_fifo_at_the_audit_path_is_refused_promptly_and_does_not_block_the_next_call(self) -> None:
         p = self.root / "state" / "audit.jsonl"
         p.parent.mkdir(mode=0o700)
@@ -668,7 +667,7 @@ class M3AuditFifo(Tmp):
         self.assertFalse(p.with_name("a.jsonl.1").exists())
 
 
-# M2 -------------------------------------------------------------------------------------------------------------------------------
+# force kill -----------------------------------------------------------------------------------------------------------------------
 
 
 class FakePlatform:
@@ -688,7 +687,7 @@ class FakePlatform:
         return [p for p, _ in self.tree]
 
 
-class M2Force(unittest.TestCase):
+class ForceKillTree(unittest.TestCase):
     def setUp(self) -> None:
         self.host = host_entry(1, pid=4242, startedAt=1_000_000_000_000)
         self.plat = FakePlatform()
@@ -742,7 +741,7 @@ class M2Force(unittest.TestCase):
         self.assertEqual((result["outcome"], result["remaining"]), ("exited", 0))
 
 
-class M2RealTable(unittest.TestCase):
+class ForceKillRealTable(unittest.TestCase):
     def test_the_platform_reports_start_times_with_the_children(self) -> None:
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
         try:
@@ -756,10 +755,10 @@ class M2RealTable(unittest.TestCase):
             child.wait()
 
 
-# M4 -------------------------------------------------------------------------------------------------------------------------------
+# link order -----------------------------------------------------------------------------------------------------------------------
 
 
-class M4Order(ScratchTestCase):
+class LinkOrder(ScratchTestCase):
     def test_the_relay_is_proven_after_the_link_is_fetched_and_just_before_it_is_returned(self) -> None:
         s = self.make([host_entry(1)])
         hub = self.hub(
@@ -784,7 +783,7 @@ class M4Order(ScratchTestCase):
         self.assertEqual(order[-2:], ["link", "proof"], order)
 
 
-# M5 -------------------------------------------------------------------------------------------------------------------------------
+# probe deadlines ------------------------------------------------------------------------------------------------------------------
 
 
 class Trickle:
@@ -824,7 +823,7 @@ class Trickle:
             conn.close()
 
 
-class M5Deadlines(unittest.TestCase):
+class ProbeDeadlines(unittest.TestCase):
     def test_a_relay_that_drips_bytes_is_cut_at_the_overall_deadline(self) -> None:
         from omp_dashboard import relay
 
@@ -853,10 +852,10 @@ class M5Deadlines(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 5)
 
 
-# M7 -------------------------------------------------------------------------------------------------------------------------------
+# dot-dot paths --------------------------------------------------------------------------------------------------------------------
 
 
-class M7DotDot(ScratchTestCase):
+class DotDotPaths(ScratchTestCase):
     def test_a_path_setting_with_dot_dot_is_refused_not_silently_collapsed(self) -> None:
         s = self.make()
         for key, value in (
@@ -878,10 +877,10 @@ class M7DotDot(ScratchTestCase):
             from_env({**s.env, "OMP_DASHBOARD_CONFIG": "/a/../b.json"})
 
 
-# M8 -------------------------------------------------------------------------------------------------------------------------------
+# project enumeration --------------------------------------------------------------------------------------------------------------
 
 
-class M8Enumeration(Tmp):
+class ProjectEnumeration(Tmp):
     def test_one_huge_directory_is_not_enumerated_without_bound(self) -> None:
         from omp_dashboard import projects
 
@@ -936,13 +935,13 @@ class M8Enumeration(Tmp):
         with mock.patch.object(projects.os, "scandir", spy):
             found = projects.discover_projects(["~/p"], self.root / "home", sessions_dir=sessions)
         self.assertNotIn(str(sessions), listed)
-        self.assertIsNotNone(found[0]["last_used"], "the session folder of the project was found by name")
+        self.assertIsNotNone(found[0]["last_used"], "the session folder of the project is located by name")
 
 
-# M9 -------------------------------------------------------------------------------------------------------------------------------
+# environment ----------------------------------------------------------------------------------------------------------------------
 
 
-class M9Environment(ScratchTestCase):
+class DropinEnvironment(ScratchTestCase):
     def test_dropins_write_refuses_while_a_fallback_variable_decides_something_the_service_would_not_see(self) -> None:
         s = self.make()
         env = {k: v for k, v in s.env.items() if k != "OMP_DASHBOARD_PORT"}
@@ -977,7 +976,7 @@ class M9Environment(ScratchTestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
 
 
-# F2 / M6 / L4 ---------------------------------------------------------------------------------------------------------------------
+# stats proxy removal --------------------------------------------------------------------------------------------------------------
 
 
 class StatsProxyIsGone(ScratchTestCase):
@@ -1003,7 +1002,7 @@ class StatsProxyIsGone(ScratchTestCase):
         self.assertEqual(hub.client.get("/api/hub/about").json()["statsUrl"], "http://127.0.0.1:3847/")
 
 
-# F14 caches / L2 ---------------------------------------------------------------------------------------------------------------------
+# relay classifier caches -------------------------------------------------------------------------------------------------------------
 
 
 class RelayClassifierFailures(unittest.TestCase):
@@ -1024,7 +1023,7 @@ class RelayClassifierFailures(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
-class L2Docs(unittest.TestCase):
+class Docs(unittest.TestCase):
     def test_the_documents_do_not_claim_what_the_evidence_does_not_show(self) -> None:
         texts = {
             p.name: p.read_text()

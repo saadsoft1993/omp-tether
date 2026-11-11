@@ -196,7 +196,7 @@ class Limits(ScratchTestCase):
         for _ in range(10):
             self.assertEqual(fresh.post("/api/hub/pair", {"token": "wrong"}).status, 403)
         self.assertEqual(fresh.post("/api/hub/pair", {"token": "wrong"}).status, 429)
-        # A token that is on file cannot be a guess, so it still pairs while wrong guesses are being refused (see test_review1).
+        # A token that is on file cannot be a guess, so it still pairs while wrong guesses are being refused (see test_regressions_1).
         self.assertEqual(fresh.post("/api/hub/pair", {"token": self.hub.app.pairing.writer.create_token()}).status, 200)
         self.assertEqual(fresh.post("/api/hub/pair", {"token": "wrong"}).status, 429)
 

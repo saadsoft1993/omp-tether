@@ -1,0 +1,114 @@
+omp-memory
+
+Copyright (c) 2026 Saad bin Abid, MIT License (see LICENSE).
+
+This notice has three parts: code in this repository that is copied from omp (with omp's license text), the packages that
+`omp-memory setup` downloads onto your machine (not part of this repository), and what is not included.
+
+----------------------------------------------------------------------------------------------------
+1. Code copied from omp (https://github.com/can1357/oh-my-pi, MIT License)
+----------------------------------------------------------------------------------------------------
+
+These files hold text or logic taken from omp's source, as of omp 18.18.3. They carry omp's copyright and license, which
+are reproduced below. `bank_id.ts` and `omp_redact.ts` also say so in their own headers; the other files below do not, so
+this list is where their origin is recorded.
+
+- vendor/memory_import/omp_redact.ts: a copy of `redactMemorySecrets` and the helpers it needs, from omp's coding agent
+  (packages/coding-agent/src/memory-backend/redact.ts). The importer applies the same redaction omp applies to every
+  memory write. It is copied because that file ships in the coding agent, not in the npm package the importer uses.
+- vendor/memory_import/bank_id.ts: a copy of `projectBankSegment` (packages/coding-agent/src/mnemopi/config.ts), the
+  function that gives a project folder its bank name, for the same reason. `omp-memory doctor` checks it against your banks.
+- vendor/omp_hub/test_memory_schema.py: the table, index and trigger definitions of omp's Mnemopi library
+  (packages/mnemopi), as they appear in a bank the library created. Tests use them to build scratch banks.
+- vendor/memory_import/lib.ts (`PARITY_REQUIREMENTS`): a few SQL statements quoted from the Mnemopi library's source. They are
+  search strings: before any write, the importer looks for them in the installed library and in the omp binary.
+- vendor/memory_import/test/redact.test.ts and test/bank-id.test.ts: the expected values were produced by running those
+  two omp functions on fixed inputs.
+
+The rest of the code in this repository (the command line, the importer, the backup scripts, the tests) is original work
+under this repository's license. The code under vendor/ is copied byte for byte from a separate source tree (see
+docs/vendoring.md); that does not change who wrote it.
+
+----------------------------------------------------------------------------------------------------
+omp (packages: coding-agent, mnemopi)
+----------------------------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2025 Mario Zechner
+Copyright (c) 2025-2026 Can Bölük
+Copyright (c) 2026 Stencil Labs, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----------------------------------------------------------------------------------------------------
+2. Packages that `omp-memory setup` downloads (not part of this repository)
+----------------------------------------------------------------------------------------------------
+
+Nothing below is copied into this repository or redistributed by it. `omp-memory setup` is a command you run yourself; it
+prints what it will fetch, then downloads these from the npm registry (https://registry.npmjs.org) into
+`~/.cache/omp-memory/lib/<omp version>/`, and the embedding runtime and model from the hosts named below into omp's own
+cache (`~/.omp/cache/fastembed*`). Each package keeps its own license, which is in the package. No other command of
+omp-memory downloads anything, except `import --apply` when `setup` was skipped and it has to fetch the embedding
+runtime or model itself.
+
+The Mnemopi library, installed with `bun add --exact @oh-my-pi/pi-mnemopi@<the version omp --version prints>`. Every package
+below is at that same version (checked for 18.18.3 on 2026-11-11), and all are MIT licensed:
+
+    @oh-my-pi/pi-mnemopi            MIT   the library the importer writes banks through
+    @oh-my-pi/pi-ai                 MIT
+    @oh-my-pi/pi-catalog            MIT
+    @oh-my-pi/pi-natives            MIT
+    @oh-my-pi/pi-natives-<os>-<cpu> MIT   one package for your platform (for example darwin-arm64, linux-arm64); it
+                                          carries a THIRD-PARTY-NOTICES.txt for the native code it contains
+    @oh-my-pi/pi-utils              MIT
+    @oh-my-pi/pi-wire               MIT
+    @oh-my-pi/omptype               MIT
+
+The embedding runtime and model, fetched by omp's Mnemopi library the first time it embeds a sentence (`setup` does that
+unless you pass `--no-embeddings`). The packages are the ones `fastembed` 3.0.0 resolved to on the checked machine
+(macOS arm64, 2026-11-11), from the npm registry; another platform or date may resolve slightly differently:
+
+    MIT (33): @anush008/tokenizers 0.6.0, @anush008/tokenizers-darwin-universal 0.6.0 (the platform package), @huggingface/blake3-jit
+    0.0.2, @huggingface/hub 2.17.10, @huggingface/tasks 0.22.2, @huggingface/xetchunk-wasm 0.2.0, ansi-regex 5.0.1, boolean
+    3.2.0, cli-progress 3.12.0, define-data-property 1.1.4, define-properties 1.2.1, detect-node 2.1.0, emoji-regex 8.0.0,
+    es-define-property 1.0.1, es-errors 1.3.0, es6-error 4.1.1, escape-string-regexp 4.0.0, fastembed 3.0.0, gearhash-jit
+    1.0.2, globalthis 1.0.4, gopd 1.2.0, has-property-descriptors 1.0.2, is-fullwidth-code-point 3.0.0, matcher 3.0.0,
+    minizlib 3.1.0, object-keys 1.1.1, onnxruntime-common 1.21.0, onnxruntime-node 1.21.0, progress 2.0.3, semver-compare
+    1.0.0, serialize-error 7.0.1, string-width 4.2.3, strip-ansi 6.0.1
+    BlueOak-1.0.0 (4): chownr 3.0.0, minipass 7.1.3, tar 7.5.22, yallist 5.0.0
+    ISC (3): @isaacs/fs-minipass 4.0.1, json-stringify-safe 5.0.1, semver 7.8.6
+    BSD-3-Clause (3): global-agent 3.0.0, roarr 2.15.4, sprintf-js 1.1.3
+    (MIT OR CC0-1.0) (1): type-fest 0.13.1
+
+    Model: Qdrant/bge-base-en-v1.5-onnx-Q, a quantised ONNX build of BAAI/bge-base-en-v1.5, from https://huggingface.co.
+    Both models are MIT licensed (the license field of their model pages, checked 2026-11-11).
+
+On Linux x64 the install script of onnxruntime-node also downloads CUDA binaries from
+https://github.com/microsoft/onnxruntime/releases unless `ONNXRUNTIME_NODE_INSTALL_CUDA=skip` is set in the environment
+(read from that script; this platform has not been run, see compat.json). Bun itself, Python, SQLite and `lsof` are your
+system's and are not fetched or bundled.
+
+----------------------------------------------------------------------------------------------------
+3. What is not included
+----------------------------------------------------------------------------------------------------
+
+Your memory (the banks, and the files of the other tools it reads, which are named in the README) is never copied into this
+repository or sent anywhere. Those tools' names identify the data this plugin reads; their owners do not endorse or
+maintain it.

@@ -2,7 +2,7 @@
 	"name": "omp-tether",
 	"owner": { "name": "saadsoft1993" },
 	"metadata": {
-		"description": "Plugins that let you reach your own omp sessions from other places on your own machines.",
+		"description": "Plugins that let you reach your own omp sessions from other places on your own machines, and look after omp's local memory.",
 		"version": "0.1.0"
 	},
 	"plugins": [
@@ -41,6 +41,15 @@
 			"license": "MIT",
 			"category": "productivity",
 			"keywords": ["dashboard", "pairing", "sessions", "loopback"]
+		},
+		{
+			"name": "omp-memory",
+			"source": "./plugins/omp-memory",
+			"version": "0.1.0",
+			"description": "A command line for omp's local memory banks: list banks and sources, label folders, import memory files from other coding tools into the banks, back them up and check them. Read-only until you pass --apply.",
+			"license": "MIT",
+			"category": "productivity",
+			"keywords": ["memory", "mnemopi", "import", "backup"]
 		}
 	]
 }

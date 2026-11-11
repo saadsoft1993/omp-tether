@@ -1,4 +1,4 @@
-// Regression tests for the findings of the independent review of 0.1.0. Each test failed on 0.1.0.
+// Regression tests: branching, control directory replacement, hung operations, connection handling, reply contents, socket mode, registry timing.
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -19,7 +19,7 @@ afterEach(async () => {
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const fdCount = () => fs.readdirSync("/dev/fd").length;
 
-describe("finding 1: session_branch", () => {
+describe("session_branch", () => {
 	test("a branch bumps the generation and republishes the registry with the live session id", async () => {
 		const h = await start();
 		const { client, nonce, sessionId, generation } = await Client.toHost(h);
@@ -36,7 +36,7 @@ describe("finding 1: session_branch", () => {
 	});
 });
 
-describe("finding 2: a replaced control directory", () => {
+describe("a replaced control directory", () => {
 	test("removing and recreating the directory in one tick brings up a new listener", async () => {
 		const h = await start();
 		const old = await h.waitFor(() => h.registry(), "the registry");
@@ -71,7 +71,7 @@ describe("finding 2: a replaced control directory", () => {
 	});
 });
 
-describe("finding 3: an operation that never finishes", () => {
+describe("an operation that never finishes", () => {
 	test("a hung rename gets a timeout reply and does not block reads or exhaust the in-flight limit", async () => {
 		const h = await start({ timerScale: 0.01 });
 		const { client, nonce, sessionId, generation } = await Client.toHost(h);
@@ -123,7 +123,7 @@ describe("finding 3: an operation that never finishes", () => {
 	});
 });
 
-describe("finding 5: connections that are turned away or closed", () => {
+describe("connections that are turned away or closed", () => {
 	test("sockets turned away with too_many_clients are destroyed even when the peer never closes", async () => {
 		const h = await start();
 		const { client, nonce } = await Client.toHost(h);
@@ -206,7 +206,7 @@ describe("finding 5: connections that are turned away or closed", () => {
 	});
 });
 
-describe("finding 5: what replies and guards contain", () => {
+describe("what replies and guards contain", () => {
 	test("an internal error reply carries a fixed message and the log holds no exception text", async () => {
 		const h = await start();
 		const { client, nonce, sessionId, generation } = await Client.toHost(h);
@@ -256,7 +256,7 @@ describe("finding 5: what replies and guards contain", () => {
 	});
 });
 
-describe("finding 8: the socket mode", () => {
+describe("the socket mode", () => {
 	test("if the socket cannot be tightened to 0600 the listener is closed instead of left open and unregistered", async () => {
 		const real = fs.chmodSync;
 		const spy = spyOn(fs, "chmodSync").mockImplementation(((p: fs.PathLike, mode: fs.Mode) => {
@@ -274,7 +274,7 @@ describe("finding 8: the socket mode", () => {
 	});
 });
 
-describe("finding 10 and 8: registry timing and directory permissions", () => {
+describe("registry timing and directory permissions", () => {
 	test("the registry is not published before the socket is bound", async () => {
 		const h = await FakeHost.start({ enable: true });
 		hosts.push(h);

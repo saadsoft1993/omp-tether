@@ -1,6 +1,6 @@
-// Regression tests for the findings of the two independent reviews of this plugin (docs/research of the workspace that
-// built it). Each test names the finding it pins. Every one of them was run against the code as it was before the fix and
-// failed there; relay-mutation.test.ts additionally deletes each relay-side guard and requires these tests to notice.
+// Regression tests: pairing endpoint, relay hygiene, listener proof, fresh install flows, drop-ins, tailscale lookup, web asset,
+// doctor and store strictness, served paths, authenticated stats, resolved roots, installed NOTICE and the web tree walk.
+// mutation.test.ts additionally deletes each relay-side guard and requires these tests to notice.
 import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -46,7 +46,7 @@ function io(): Io & { stdout: string; stderr: string } {
 
 // ── pairing endpoint: framing, budget, guards that a real token proves ─────────────────────────
 
-describe("pairing endpoint (review 1 F3 and F5, review 2 M2 and M3)", () => {
+describe("pairing endpoint", () => {
 	let relay: Relay;
 	let writer: PairingWriter;
 	const post = (over: Record<string, string | null>, body: string, extra: { method?: string } = {}) =>
@@ -60,7 +60,7 @@ describe("pairing endpoint (review 1 F3 and F5, review 2 M2 and M3)", () => {
 		await relay?.stop();
 	});
 
-	// F5: every refusal is proven with a REAL token, which must still be redeemable afterwards: a 403 for an unknown token
+	// Every refusal is proven with a REAL token, which must still be redeemable afterwards: a 403 for an unknown token
 	// would pass even without the guard under test.
 	const guards: Array<[string, Record<string, string | null>]> = [
 		["no custom header (a plain cross-site form post)", { "X-Omp-Relay": null }],
@@ -82,7 +82,7 @@ describe("pairing endpoint (review 1 F3 and F5, review 2 M2 and M3)", () => {
 		});
 	}
 
-	test("F3/M2: a body without Content-Length, or sent chunked, is refused (411) even when small, and the token survives", async () => {
+	test("a body without Content-Length, or sent chunked, is refused (411) even when small, and the token survives", async () => {
 		await start();
 		const token = await writer.createToken();
 		// no Content-Length at all (rawRequest adds one only when a body is given)
@@ -93,7 +93,7 @@ describe("pairing endpoint (review 1 F3 and F5, review 2 M2 and M3)", () => {
 		expect((await post({}, JSON.stringify({ token }))).status).toBe(200);
 	});
 
-	test("F3/M2: a large chunked body is cut off and refused, not buffered", async () => {
+	test("a large chunked body is cut off and refused, not buffered", async () => {
 		await start();
 		const token = await writer.createToken();
 		const big = JSON.stringify({ token, pad: "x".repeat(200_000) });
@@ -113,7 +113,7 @@ describe("pairing endpoint (review 1 F3 and F5, review 2 M2 and M3)", () => {
 		expect((await post({}, JSON.stringify({ token }))).status).toBe(200);
 	});
 
-	test("M3: simultaneous failures cannot all pass a check made before any of them failed (the budget is reserved first)", async () => {
+	test("simultaneous failures cannot all pass a check made before any of them failed (the budget is reserved first)", async () => {
 		await start();
 		const results = await Promise.all(Array.from({ length: 25 }, (_, i) => post({}, JSON.stringify({ token: `wrong-${i}` }))));
 		const refused = results.filter(r => r.status === 403).length;
@@ -121,7 +121,7 @@ describe("pairing endpoint (review 1 F3 and F5, review 2 M2 and M3)", () => {
 		expect(results.filter(r => r.status === 429).length).toBeGreaterThanOrEqual(15);
 	});
 
-	test("M3: attempts stalled before their body arrives hold their slot, so an eleventh attempt is refused even with a valid token", async () => {
+	test("attempts stalled before their body arrives hold their slot, so an eleventh attempt is refused even with a valid token", async () => {
 		await start();
 		const token = await writer.createToken();
 		const head = [`POST /__pair HTTP/1.1`, ...Object.entries(guestHeaders(relay, { Cookie: null, "Content-Type": "application/json", "X-Omp-Relay": "1", "Content-Length": "40" })).map(([k, v]) => `${k}: ${v}`), "", ""].join("\r\n");
@@ -143,7 +143,7 @@ describe("pairing endpoint (review 1 F3 and F5, review 2 M2 and M3)", () => {
 
 // ── identity: connection cap, hostile paths in the log, cache policy ───────────────────────────
 
-describe("relay hygiene (review 2 L1 of the predecessor, review 1 F9)", () => {
+describe("relay hygiene", () => {
 	test("a hard cap on open sockets: the fifth upgrade is refused before it gets a socket, however many ask", async () => {
 		const relay = await startRelay({ adapter: "token", env: { OMP_PRIVATE_RELAY_MAX_CONNECTIONS: "4" } });
 		try {
@@ -198,10 +198,10 @@ describe("relay hygiene (review 2 L1 of the predecessor, review 1 F9)", () => {
 	});
 });
 
-// ── listener proof: M1 (key published after the binds), H1/F2 (pair refuses an unproven port), M5 (status) ─────────────
+// ── listener proof: key published after the binds, pair refuses an unproven port, status ─────────────
 
-describe("listener proof (review 2 M1, H1 and M5; review 1 F2)", () => {
-	test("M1: a second start that fails on the taken port leaves the running relay's proof valid", async () => {
+describe("listener proof", () => {
+	test("a second start that fails on the taken port leaves the running relay's proof valid", async () => {
 		const relay = await startRelay({ adapter: "token" });
 		try {
 			const before = readCheckKey(relay.checkDir);
@@ -222,7 +222,7 @@ describe("listener proof (review 2 M1, H1 and M5; review 1 F2)", () => {
 		return { HOME: root, PATH: "/usr/bin:/bin", OMP_PRIVATE_RELAY_HOST_PORT: String(host), OMP_PRIVATE_RELAY_GUEST_PORT: String(guest) };
 	}
 
-	test("F2/H1: pair makes no link and no token while the guest port does not prove to be this relay", async () => {
+	test("pair makes no link and no token while the guest port does not prove to be this relay", async () => {
 		const root = scratch();
 		const [host, guest] = await freePorts(2);
 		const impostor = Bun.serve({ hostname: "127.0.0.1", port: guest, fetch: () => Response.json({ mac: "0".repeat(64) }) });
@@ -240,7 +240,7 @@ describe("listener proof (review 2 M1, H1 and M5; review 1 F2)", () => {
 		}
 	});
 
-	test("F2: with no relay (no key) there is no link either", async () => {
+	test("with no relay (no key) there is no link either", async () => {
 		const root = scratch();
 		const [host, guest] = await freePorts(2);
 		const out = io();
@@ -249,7 +249,7 @@ describe("listener proof (review 2 M1, H1 and M5; review 1 F2)", () => {
 		expect(fs.existsSync(path.join(root, ".config", "omp-private-relay", "pairing"))).toBe(false);
 	});
 
-	test("F2 (reorder): when the address cannot be named, no orphan token is left behind", async () => {
+	test("when the address cannot be named, no orphan token is left behind", async () => {
 		const relay = await startRelay({ adapter: "tailscale-serve", unknownIdentity: true });
 		try {
 			// the relay was started with an unknown identity (503 to browsers); pair runs with the same unusable tailscale
@@ -263,7 +263,7 @@ describe("listener proof (review 2 M1, H1 and M5; review 1 F2)", () => {
 		}
 	});
 
-	test("M5: status does not trust an unproven listener: no redirect followed, no terminal control sequences shown", async () => {
+	test("status does not trust an unproven listener: no redirect followed, no terminal control sequences shown", async () => {
 		const root = scratch();
 		const [host, guest] = await freePorts(2);
 		const impostor = Bun.serve({ hostname: "127.0.0.1", port: host as number, fetch: () => Response.json({ rooms: "\u001b[31mRED", guests: "\u001b]0;pwn\u0007", ready: true, uptimeS: 5 }) });
@@ -285,7 +285,7 @@ describe("listener proof (review 2 M1, H1 and M5; review 1 F2)", () => {
 		}
 	});
 
-	test("M5: even a proven listener's numbers are shown only as numbers", async () => {
+	test("even a proven listener's numbers are shown only as numbers", async () => {
 		const relay = await startRelay({ adapter: "token" });
 		try {
 			const out = io();
@@ -317,7 +317,7 @@ describe("listener proof (review 2 M1, H1 and M5; review 1 F2)", () => {
 
 // ── CLI and install flows ────────────────────────────────────────────────────────────────────────────────────
 
-describe("fresh install flows (review 1 F1, review 2 M6 and H2)", () => {
+describe("fresh install flows", () => {
 	const fakeBuild = (root: string): string => {
 		const script = path.join(root, "fake-build.sh");
 		fs.writeFileSync(script, `#!/bin/bash\nwhile [ $# -gt 0 ]; do case "$1" in --out) out="$2"; shift 2;; *) shift;; esac; done\nmkdir -p "$out"\necho '<!doctype html><title>built</title>' > "$out/index.html"\necho 'js' > "$out/abcd1234.js"\n`, { mode: 0o755 });
@@ -354,7 +354,7 @@ describe("fresh install flows (review 1 F1, review 2 M6 and H2)", () => {
 		expect(fs.statSync(data).mode & 0o777).toBe(0o777); // not chmod-ed behind the person's back
 	});
 
-	test("H2: init validates the effective configuration before it executes the omp that the file names", async () => {
+	test("init validates the effective configuration before it executes the omp that the file names", async () => {
 		const root = scratch();
 		const home = path.join(root, "home");
 		const dir = path.join(home, ".config", "omp-private-relay");
@@ -369,7 +369,7 @@ describe("fresh install flows (review 1 F1, review 2 M6 and H2)", () => {
 		expect(fs.existsSync(marker)).toBe(false);
 	});
 
-	test("H2: a config file in a directory that others can write (not sticky) is refused before it is read", () => {
+	test("a config file in a directory that others can write (not sticky) is refused before it is read", () => {
 		const root = scratch();
 		const dir = path.join(root, "shared");
 		fs.mkdirSync(dir);
@@ -381,7 +381,7 @@ describe("fresh install flows (review 1 F1, review 2 M6 and H2)", () => {
 		expect(readConfigFile(file)).toEqual({ schemaVersion: 1 });
 	});
 
-	test("H2: the config is read through one descriptor: a FIFO or a link in its place is refused without blocking", () => {
+	test("the config is read through one descriptor: a FIFO or a link in its place is refused without blocking", () => {
 		const root = scratch();
 		const fifo = path.join(root, "fifo.json");
 		Bun.spawnSync(["mkfifo", fifo]);
@@ -407,9 +407,9 @@ describe("fresh install flows (review 1 F1, review 2 M6 and H2)", () => {
 	});
 });
 
-// ── drop-ins describe the relay that runs (review 2 M4) ─────────────────────────────────────────────────────────
+// ── drop-ins describe the relay that runs ──────────────────────────────────────────
 
-describe("drop-ins select the same configuration (review 2 M4)", () => {
+describe("drop-ins select the same configuration", () => {
 	test("both the service and the proof command carry the absolute config path, and run from a clean environment", async () => {
 		const relay = await startRelay({ adapter: "token" });
 		try {
@@ -479,7 +479,7 @@ describe("drop-ins select the same configuration (review 2 M4)", () => {
 		expect(out.stderr).toContain("run init first");
 	});
 
-	test("review 1 F9: writing a drop-in never changes the mode of a directory that belongs to another tool", () => {
+	test("writing a drop-in never changes the mode of a directory that belongs to another tool", () => {
 		const root = scratch();
 		const env = { HOME: root, XDG_CONFIG_HOME: path.join(root, "cfg") };
 		const paths = dropinPaths(env);
@@ -492,9 +492,9 @@ describe("drop-ins select the same configuration (review 2 M4)", () => {
 	});
 });
 
-// ── tailscale adapter: no blocking calls (review 1 F6) ─────────────────────────────────────────────────
+// ── tailscale adapter: no blocking calls ───────────────────────────────────────────
 
-describe("tailscale lookup is asynchronous (review 1 F6)", () => {
+describe("tailscale lookup is asynchronous", () => {
 	test("a request that finds the identity unknown is answered at once, and the lookup finishes in the background", async () => {
 		let release: (v: { host: string; login: string }) => void = () => {};
 		const pending = new Promise<{ host: string; login: string }>(r => {
@@ -531,10 +531,10 @@ describe("tailscale lookup is asynchronous (review 1 F6)", () => {
 	});
 });
 
-// ── web asset: redirects, notice, interrupted install (review 1 F7 and F8, review 2 L3) ───────────────────────────
+// ── web asset: redirects, notice, interrupted install ──────────────────────────────
 
-describe("web asset (review 1 F7 and F8, review 2 L3)", () => {
-	test("F8: plain http to loopback is accepted only as the starting URL, never as the target of a redirect from https", async () => {
+describe("web asset", () => {
+	test("plain http to loopback is accepted only as the starting URL, never as the target of a redirect from https", async () => {
 		const fetcher = async (u: string) => (u.startsWith("https://") ? new Response(null, { status: 302, headers: { Location: "http://127.0.0.1:9/probe" } }) : new Response("payload"));
 		await expect(download("https://example.invalid/a.tar", fetcher)).rejects.toThrow(/only downloaded over https/);
 		expect((await download("http://127.0.0.1:9/a.tar", async () => new Response("payload"))).toString()).toBe("payload");
@@ -547,7 +547,7 @@ describe("web asset (review 1 F7 and F8, review 2 L3)", () => {
 	const one = (text: string) => new Map([["index.html", Buffer.from(text)]]);
 	const listing = (target: string) => fs.readdirSync(path.dirname(target)).sort();
 
-	test("L3/R5: an install interrupted between its two renames is recovered from its own record, and nothing else beside it is touched", () => {
+	test("an install interrupted between its two renames is recovered from its own record, and nothing else beside it is touched", () => {
 		const root = scratch();
 		const target = path.join(root, "web", "current");
 		installTree(one("old"), BUILD, target);
@@ -574,7 +574,7 @@ describe("web asset (review 1 F7 and F8, review 2 L3)", () => {
 		expect(fs.readFileSync(path.join(path.dirname(target), pidNamed, "keep.txt"), "utf8")).toBe("x");
 	});
 
-	test("R5: a record that is damaged, foreign or unreadable stops the install and removes nothing; it is never skipped", () => {
+	test("a record that is damaged, foreign or unreadable stops the install and removes nothing; it is never skipped", () => {
 		const root = scratch();
 		const target = path.join(root, "web", "current");
 		installTree(one("old"), BUILD, target);
@@ -602,7 +602,7 @@ describe("web asset (review 1 F7 and F8, review 2 L3)", () => {
 
 	const CHILD = path.join(import.meta.dir, "support", "installer-child.ts");
 
-	test("R5: an installer that holds the lock, with nothing yet written to the lock file, is waited for, not taken over", async () => {
+	test("an installer that holds the lock, with nothing yet written to the lock file, is waited for, not taken over", async () => {
 		const root = scratch();
 		const target = path.join(root, "web", "current");
 		fs.mkdirSync(path.dirname(target), { mode: 0o700 });
@@ -621,7 +621,7 @@ describe("web asset (review 1 F7 and F8, review 2 L3)", () => {
 		expect(fs.readFileSync(path.join(target, "index.html"), "utf8")).toBe("y");
 	}, 20_000);
 
-	test("R5: two installers racing in separate processes serialise: no error, no leftover, one complete result", async () => {
+	test("two installers racing in separate processes serialise: no error, no leftover, one complete result", async () => {
 		const root = scratch();
 		const target = path.join(root, "web", "current");
 		fs.mkdirSync(path.dirname(target), { mode: 0o700 });
@@ -637,7 +637,7 @@ describe("web asset (review 1 F7 and F8, review 2 L3)", () => {
 		expect(fs.readFileSync(path.join(target, "index.html"), "utf8")).toMatch(/^[ABC]\d+$/);
 	}, 60_000);
 
-	test("R5: a lock file that is not a private plain file of ours is refused", () => {
+	test("a lock file that is not a private plain file of ours is refused", () => {
 		const root = scratch();
 		const target = path.join(root, "web", "current");
 		fs.mkdirSync(path.dirname(target), { mode: 0o700 });
@@ -650,7 +650,7 @@ describe("web asset (review 1 F7 and F8, review 2 L3)", () => {
 		expect(() => installTree(one("x"), BUILD, target)).toThrow(/cannot be opened/);
 	});
 
-	test("F7: an archive whose content matches but whose NOTICE differs from its pin is refused", () => {
+	test("an archive whose content matches but whose NOTICE differs from its pin is refused", () => {
 		const files = new Map<string, Buffer>([["index.html", Buffer.from("<title>x</title>")], ["NOTICE", Buffer.from("the real notice")]]);
 		const tar = packTar(files);
 		const build: WebBuild = { ompTag: "v1.0.0", bun: "1", asset: "a", sha256: sha256(tar), treeSha256: treeHash(files), noticeSha256: sha256(Buffer.from("the real notice")), bytes: tar.length, files: 2 };
@@ -661,17 +661,17 @@ describe("web asset (review 1 F7 and F8, review 2 L3)", () => {
 		expect(() => verifyAsset(none, { ...build, sha256: sha256(none), treeSha256: treeHash(new Map([["index.html", Buffer.from("<title>x</title>")]])) })).toThrow(/NOTICE/);
 	});
 
-	test("F7: the NOTICE file is pinned on its own and the checked-in NOTICE is the one the pin names", () => {
+	test("the NOTICE file is pinned on its own and the checked-in NOTICE is the one the pin names", () => {
 		const builds = JSON.parse(fs.readFileSync(path.join(import.meta.dir, "..", "..", "web-builds.json"), "utf8")) as { builds: Record<string, WebBuild> };
 		const notice = fs.readFileSync(path.join(import.meta.dir, "..", "..", "NOTICE"));
 		for (const b of Object.values(builds.builds)) expect(b.noticeSha256, "editing NOTICE needs scripts/release-web.sh to be run again").toBe(sha256(notice));
 	});
 });
 
-// ── doctor and the pairing store (review 2 L1, L2, L4) ───────────────────────────────────────────────────────
+// ── doctor and the pairing store ───────────────────────────────────────────────────
 
-describe("doctor and store strictness (review 2 L1, L2, L4)", () => {
-	test("L2: doctor does not call a pairing store healthy that the relay would refuse", async () => {
+describe("doctor and store strictness", () => {
+	test("doctor does not call a pairing store healthy that the relay would refuse", async () => {
 		const root = scratch();
 		const real = path.join(root, "real");
 		fs.mkdirSync(real, { mode: 0o700 });
@@ -696,12 +696,12 @@ describe("doctor and store strictness (review 2 L1, L2, L4)", () => {
 		expect(sharedPairing?.message).toContain("store-missing");
 	});
 
-	test("L2: the runtime finding comes from the real version check", async () => {
+	test("the runtime finding comes from the real version check", async () => {
 		const findings = await runDoctor({ HOME: scratch(), PATH: "/usr/bin:/bin" });
 		expect(findings.find(f => f.id === "runtime")?.level).toBe("ok"); // this suite runs on a supported Bun
 	});
 
-	test("L1: a zero-byte devices.json is a truncated store: the writer refuses it and leaves it alone", async () => {
+	test("a zero-byte devices.json is a truncated store: the writer refuses it and leaves it alone", async () => {
 		const dir = path.join(scratch(), "store");
 		fs.mkdirSync(dir, { mode: 0o700 });
 		fs.writeFileSync(path.join(dir, "devices.json"), "", { mode: 0o600 });
@@ -713,7 +713,7 @@ describe("doctor and store strictness (review 2 L1, L2, L4)", () => {
 		await expect(w.createToken()).rejects.toThrow(/not valid JSON/);
 	});
 
-	test("L4: an existing lock file that others can read or write is refused", async () => {
+	test("an existing lock file that others can read or write is refused", async () => {
 		const dir = path.join(scratch(), "store");
 		fs.mkdirSync(dir, { mode: 0o700 });
 		fs.writeFileSync(path.join(dir, ".lock"), "", { mode: 0o666 });
@@ -731,9 +731,9 @@ describe("doctor and store strictness (review 2 L1, L2, L4)", () => {
 	});
 });
 
-// ── verification pass: R1 (served paths), R4 (authenticated stats), R6 (resolved roots), R8 (installed NOTICE) ─────────
+// ── served paths, authenticated stats, resolved roots, installed NOTICE ───────────────
 
-describe("served and executed paths (verification R1)", () => {
+describe("served and executed paths", () => {
 	test("installing into a group-writable parent is refused, not accepted because the mode is only 0775", () => {
 		const root = scratch();
 		const parent = path.join(root, "web");
@@ -798,7 +798,7 @@ describe("served and executed paths (verification R1)", () => {
 	});
 });
 
-describe("status believes only authenticated counts (verification R4)", () => {
+describe("status believes only authenticated counts", () => {
 	const keyOf = (relay: Relay) => {
 		const k = readCheckKey(relay.checkDir);
 		if (!k.ok) throw new Error(k.reason);
@@ -862,7 +862,7 @@ describe("status believes only authenticated counts (verification R4)", () => {
 	});
 });
 
-describe("resolved roots in the drop-ins (verification R6)", () => {
+describe("resolved roots in the drop-ins", () => {
 	test("with no XDG variables when the drop-ins are written, the proof command still finds the relay when its own environment carries other ones", async () => {
 		const relay = await startRelay({ adapter: "token" });
 		try {
@@ -900,7 +900,7 @@ describe("resolved roots in the drop-ins (verification R6)", () => {
 	});
 });
 
-describe("installed NOTICE (verification R8)", () => {
+describe("installed NOTICE", () => {
 	const mk = (notice: string): { files: Map<string, Buffer>; build: WebBuild } => {
 		const files = new Map<string, Buffer>([["index.html", Buffer.from("<title>x</title>")], ["NOTICE", Buffer.from(notice)]]);
 		const tar = packTar(files);
@@ -939,9 +939,9 @@ describe("installed NOTICE (verification R8)", () => {
 	});
 });
 
-// ── second verification pass ───────────────────────────────────────────────────────────────────
+// ── the web tree walk, signed answer bound, legacy installs ───────────────────────────
 
-describe("the web tree is read only after its path is approved (second verification: 2 and 5)", () => {
+describe("the web tree is read only after its path is approved", () => {
 	const guestGet = (relay: Relay, p = "/") => rawRequest(relay.guestPort, p, guestHeaders(relay, { Origin: null }));
 
 	test("a web directory that is a link into a tree another account can write to is refused at once, and its content is never served", async () => {
@@ -1012,7 +1012,7 @@ describe("the web tree is read only after its path is approved (second verificat
 	}, 30_000);
 });
 
-describe("the bound on a signed answer is in bytes (second verification: 7)", () => {
+describe("the bound on a signed answer is in bytes", () => {
 	const streamOf = (...chunks: Uint8Array[]) => new Response(new ReadableStream({ start: c => { for (const x of chunks) c.enqueue(x); c.close(); } }));
 
 	test("bytes, not characters: a multibyte answer past the bound is refused though it has fewer characters than the bound", async () => {
@@ -1049,7 +1049,7 @@ describe("the bound on a signed answer is in bytes (second verification: 7)", ()
 	});
 });
 
-describe("an install recorded by an older version is not certified (second verification: 8)", () => {
+describe("an install recorded by an older version is not certified", () => {
 	test("without a NOTICE hash the state is legacy, status says not verified, doctor fails it, and init installs it again", async () => {
 		const root = scratch();
 		const files = new Map<string, Buffer>([["index.html", Buffer.from("<title>x</title>")], ["NOTICE", Buffer.from("notice")]]);

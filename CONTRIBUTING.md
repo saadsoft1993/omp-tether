@@ -1,7 +1,7 @@
 # Contributing to omp-tether
 
-Thanks for helping. This repository holds four small plugins for [omp](https://github.com/can1357/oh-my-pi) that let you
-reach your own sessions from other places on your own machines. It is maintained by one person, so small, focused changes
+Thanks for helping. This repository holds five small plugins for [omp](https://github.com/can1357/oh-my-pi): four that let you
+reach your own sessions from other places on your own machines, and one (`omp-memory`) for omp's local memory banks. It is maintained by one person, so small, focused changes
 that come with tests are the easiest to review.
 
 ## Before you start
@@ -64,7 +64,10 @@ make help            # the individual targets, for a quicker loop while you work
 `make check` runs `check-contrib` and then the maintainer's publication gate (`make public-check`). That gate needs a clean
 working tree and requires every commit to carry one maintainer identity, so a branch with your commits fails it by design:
 run `check-contrib`, not `check`. The maintainer runs the gate before every release. If you add a file, the gate's path
-allowlist (`tools/public-tree-check/allowlist.txt`) has to list it; add the path to your pull request.
+allowlist (`tools/public-tree-check/allowlist.txt`) has to list it; add the path to your pull request. The gate also fails on
+the names of other coding tools and vendors in a file; `omp-memory` has to name the tools whose memory files it reads, so its
+files are listed one by one, each with a reason, in `tools/public-tree-check/exemptions.json` (exact paths only, product names
+only; `test_exemptions.py` keeps it narrow). A new file that must name such a tool needs its own entry.
 
 There is no continuous-integration workflow in this repository yet; the maintainer runs `make check` before merging.
 
@@ -80,6 +83,9 @@ There is no continuous-integration workflow in this repository yet; the maintain
   schema and its conformance suite in the same pull request, and bumps the protocol number when it is not compatible.
 - **Update the plugin's `CHANGELOG.md`** under the next version, and its README or threat model when behaviour or the trust
   model changes.
+- **Do not edit `plugins/omp-memory/vendor/`.** It is copied byte for byte from a separate source tree and a test
+  fails when a file drifts (`docs/vendoring.md`). Send the change to a vendored file as a patch in the pull request description
+  or an issue; the maintainer applies it at the source and re-syncs.
 - **Keep the commits plain:** an imperative subject line that says what changed, a body that says why when it is not obvious.
 - **Style:** `ruff` for Python (`make lint`), `shellcheck` for shell, and the existing style of the TypeScript next to your
   change. Match the code around it; do not reformat files you are not changing.

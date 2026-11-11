@@ -3,9 +3,8 @@
 For people deciding whether to enable it, and for people reviewing it. Plain language; the protocol itself is in
 [`docs/protocol/control-1.md`](../../../docs/protocol/control-1.md).
 
-Status: two independent reviews of 0.1.0 (by different reviewers) have been done and their findings fixed (see the
-changelog). That is not a certification: nothing here has been audited by a third party, and the "accepted" items below
-remain the author's judgement. Read the source, it is one file.
+Status: beta. This is not a certification: nothing here has been audited by a third party, and the "accepted" items below
+are the author's judgement. Read the source, it is one file.
 
 ## What it is, and what it gives an attacker
 
@@ -79,7 +78,7 @@ shared-home or network-home setups, so it is unsupported there. Windows is unsup
 
 ## Open items
 
-- Independent review (planned before the first public release).
+- No third-party audit has been done.
 - The default directory follows `~/.config`, not `$XDG_CONFIG_HOME`; set `OMP_SESSION_CONTROL_DIR` if you need another.
 - `getPluginSettings` is an omp internal, not a documented extension API. If omp changes it, the extension falls back to
   the defaults (and the environment), which is the safe direction.

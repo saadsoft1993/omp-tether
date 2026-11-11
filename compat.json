@@ -101,6 +101,34 @@
 			],
 			"produces": ["services/1 drop-in", "health/1 drop-in"],
 			"note": "The dashboard page is committed in ui-dist and pinned by ui-build.json (SHA-256 per file); it needs no network."
+		},
+		"omp-memory": {
+			"version": "0.1.0",
+			"protocols": [],
+			"platforms": ["darwin", "linux"],
+			"platformsTested": [
+				"darwin-arm64: macOS 27.2 (MacBook), Bun 1.4.4, Python 3.14.7 and 3.10.20, the real omp 18.18.3: the importer's Bun suite (210 tests), the plugin Python suite (212 tests, one skipped: /proc is Linux only), shellcheck, ruff, the extension-load gate, the whole-cycle smoke (scripts/smoke.sh) with the real embedding model, and the suites again under a macOS sandbox profile that denies reading and writing the real omp, other coding tools' and omp-memory directories",
+				"linux-arm64: Ubuntu 24.04.5 container, non-root user, Bun 1.4.4, Python 3.12.3, sqlite3 3.45.1: the Bun suite, the Python suite with lsof and with lsof hidden from PATH (the /proc scan), and the smoke cycle",
+				"darwin-arm64: macOS 27.2 (Mac mini), the real omp 18.18.0, Bun 1.4.4, Homebrew Python 3.14: the smoke cycle with `omp-memory setup` run in a scratch home, and the Python suite"
+			],
+			"platformsNotTested": [
+				"linux-x64 (including the CUDA download of onnxruntime-node's install script on that platform)",
+				"a Linux whose userland is neither GNU nor BSD (busybox, musl)",
+				"Windows: not supported",
+				"the real omp binary of versions other than 18.18.0 and 18.18.3 (the library releases 18.18.0 to 18.18.8 pass the structural SQL check, the write test and the importer suite; the write test decides at run time and its refusal names the failing step)"
+			],
+			"python": ">=3.10",
+			"bun": ">=1.4.4",
+			"ompTested": ["18.18.0", "18.18.3"],
+			"ompVerifiedRange": { "first": "18.18.0", "last": "18.18.8" },
+			"ompInterfaces": [
+				"omp --version prints omp/<major.minor.patch>",
+				"The mnemopi bank layout: <agent dir>/memories/mnemopi/banks/<bank>/mnemopi.db, the core tables of omp's Mnemopi library (the importer compares each bank, including its trigger definitions, with a fresh library database and refuses on a difference)",
+				"The Mnemopi library, the published npm package @oh-my-pi/pi-mnemopi at exactly the version omp --version prints (found in omp's plugin directory or installed by `omp-memory setup`); the importer refuses any other version and looks for the SQL it relies on in the package and, when it can be scanned, in the omp binary",
+				"omp's bank id for a folder (<sanitized basename>-<Bun.hash(folder) in base 36>), a local copy that `doctor` checks against the existing banks, and omp's memory redaction (a local copy)"
+			],
+			"produces": [],
+			"note": "Command line only: no extension. The network is used by `omp-memory setup` (the npm registry for the library; then the embedding runtime from npm and the model from huggingface.co, once), by the embedding step of `import --apply` when setup was skipped, and by the optional export-hindsight when run with --apply. The code under vendor/ is copied byte for byte from a separate source tree (scripts/sync-vendor.sh, OMP_MEMORY_SOURCE_DIR) and a test fails when it drifts. NOTICE lists the code copied from omp and the packages setup downloads."
 		}
 	}
 }

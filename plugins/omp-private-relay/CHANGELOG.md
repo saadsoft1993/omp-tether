@@ -14,8 +14,7 @@ The web client asset is unchanged (`omp-private-relay-web-18.18.tar`, same pin, 
 
 ## 0.1.0 (2026-11-11)
 
-Review fixes (independent security reviews, every finding fixed or answered; tests in `tests/unit/review-fixes.test.ts`, and
-`tests/mutation` reverts each fix and requires a test to fail):
+Hardening (tests in `tests/unit/regressions.test.ts`; `tests/mutation` reverts each guard and requires a test to fail):
 
 - `rebuild-web` creates the data directory's parent (it crashed on a fresh install). `pair` first proves that the guest port
   is this relay and creates no token and prints no link otherwise (and no orphan token when the address is unknown).
@@ -34,13 +33,13 @@ Review fixes (independent security reviews, every finding fixed or answered; tes
 - The web asset: loopback http is accepted only as the starting URL, `NOTICE` is pinned separately from the content hash,
   an install interrupted between its renames is recovered, `--asset-file` is size-bounded, and `scripts/verify-web.sh` was run
   against the pin (`make verify-web`).
-- Verification pass: the web client's whole path is checked (and refused when another account could replace it), directories
+- Web client path and status: the web client's whole path is checked (and refused when another account could replace it), directories
   are created 0700 whatever the umask and a configured key directory is refused rather than chmod-ed; the connection cap is
   enforced before the upgrade; `status` believes only counts that carry a MAC (`/__relay_stats`, relay-check/1 section 5) and
   reads them bounded; installs are serialised and recorded so recovery touches only its own directories; the drop-ins pin the
   resolved XDG roots; the installed `NOTICE` is verified and a notice-only release is installed; the mutation harness requires
   the designated test itself to fail; `make release-check` requires the archive and omp-services' schemas.
-- Second verification pass: the web path is walked component by component (links followed and their targets walked, `..`
+- Web path walk and install lock: the web path is walked component by component (links followed and their targets walked, `..`
   taken from the real directory, owners, writable bits, sticky, ACLs through `ls -le` / `getfacl`, loops refused), a
   group-writable directory is accepted only for a group shown to have no member but you or root (never on macOS), and the
   relay serves from the resolved directory whose identity it re-checks; error pages and health answers never open the web tree
@@ -52,7 +51,7 @@ Review fixes (independent security reviews, every finding fixed or answered; tes
 - Documentation: the cookie is not port-scoped, a local process can forge the Tailscale header and spend the pairing budget,
   the listener proof detects but does not prevent navigation to an impostor, install is two renames.
 
-First release. It generalises a relay that ran for one person on two machines, and carries over the protections of that relay that its tests can check (see the threat model for what remains accepted).
+First release. Its tests check the protections listed in the threat model; the threat model also lists what remains accepted.
 
 - The Collab relay (`src/relay.ts`): host listener for omp sessions and guest listener for browsers, both on `127.0.0.1`
   only; room contract of omp's stand-in relay; caps on rooms, guests, frame sizes and queued bytes; slow-consumer cut
@@ -74,4 +73,4 @@ First release. It generalises a relay that ran for one person on two machines, a
 - The patched web client for omp 18.18, a release asset pinned by two hashes and verified before installation; the patch
   for omp 18.18 also connects over `ws://` on loopback http, and shows a relay-specific text for close code 4401.
 - Drop-ins for `omp-services`: a `services/1` unit description and a `health/1` check list.
-- Fixed while following the README on a clean machine: `doctor` called the pairing store of an `own` setup a failure until the first browser had been paired; it is now a warning ("no browser is paired yet", fix `omp-private-relay pair`). A missing store in `shared` mode still fails.
+- `doctor` reports the pairing store of an `own` setup as a warning ("no browser is paired yet", fix `omp-private-relay pair`) until the first browser has been paired, not as a failure. A missing store in `shared` mode still fails.

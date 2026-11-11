@@ -33,9 +33,7 @@ it has a build for in `web-builds.json`.
 
 ## What is not claimed
 
-The relay generalises one whose first design had an independent security review; the findings were fixed and each has a
-test. This plugin has had independent security reviews, and every finding was fixed or answered with evidence (the changelog lists
-them; `make test-mutation` reverts each fix in a copy and requires its regression test to fail). The fixes themselves have not
-been reviewed again, and no third-party audit has been done, so treat early releases as beta software. The patched web client is a build of
+`make test-mutation` reverts each guard in a copy of the plugin and requires its designated regression test to fail.
+No third-party audit has been done, so treat early releases as beta software. The patched web client is a build of
 omp's own browser client: its code is omp's, with the three changes listed in the README. Do not run the relay on an
 account you share with people you do not trust.

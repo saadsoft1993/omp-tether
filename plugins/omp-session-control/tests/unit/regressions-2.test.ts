@@ -1,4 +1,4 @@
-// Regression tests for the second independent review. Each test failed on the code it reviewed.
+// Regression tests: mutation serialization, special files, log contents, directory recovery, registry publishing, live disable, frame edges.
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -26,7 +26,7 @@ const rename = (nonce: string, sessionId: string, generation: number, name: stri
 	args: { name },
 });
 
-describe("review 2, finding 4: serialization lasts until the host operation settles", () => {
+describe("serialization lasts until the host operation settles", () => {
 	test("a timed-out rename that finishes late cannot overwrite a later rename: the later one is refused until it settles", async () => {
 		const h = await start({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } });
 		const { client, nonce, sessionId, generation } = await Client.toHost(h);
@@ -74,7 +74,7 @@ describe("review 2, finding 4: serialization lasts until the host operation sett
 	});
 });
 
-describe("review 2, finding 5: special files in the control directory never block the session", () => {
+describe("special files in the control directory never block the session", () => {
 	const runChild = async (mode: string) => {
 		const child = Bun.spawn([process.execPath, path.join(import.meta.dir, "support/fifo-child.ts"), mode], { stdout: "pipe", stderr: "pipe" });
 		const timer = setTimeout(() => child.kill(), 12_000);
@@ -110,7 +110,7 @@ describe("review 2, finding 5: special files in the control directory never bloc
 	});
 });
 
-describe("review 2, finding 6: the log holds categories, not arbitrary exception text", () => {
+describe("the log holds categories, not arbitrary exception text", () => {
 	test("exception text, including a proposed name, never reaches events.log by default", async () => {
 		const h = await start();
 		const { client, nonce, sessionId, generation } = await Client.toHost(h);
@@ -150,7 +150,7 @@ describe("review 2, finding 6: the log holds categories, not arbitrary exception
 	});
 });
 
-describe("review 2, finding 8: recovery after the directory was seen missing", () => {
+describe("recovery after the directory was seen missing", () => {
 	test("removing the directory, letting control close, then recreating it brings control back", async () => {
 		const h = await start();
 		const old = await h.waitFor(() => h.registry(), "the registry");
@@ -166,7 +166,7 @@ describe("review 2, finding 8: recovery after the directory was seen missing", (
 	});
 });
 
-describe("review 2, finding 9: publishing the registry is part of starting", () => {
+describe("publishing the registry is part of starting", () => {
 	test("a registry that cannot be published closes the listener, leaves no temporary file, and reports it", async () => {
 		const real = fs.renameSync;
 		const spy = spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
@@ -190,7 +190,7 @@ describe("review 2, finding 9: publishing the registry is part of starting", () 
 	});
 });
 
-describe("review 2, finding 7: failing to enforce the live disable is visible", () => {
+describe("failing to enforce the live disable is visible", () => {
 	test("status and a one-time notice say that live disabling is unavailable when the settings registry cannot be used", async () => {
 		const h = await start();
 		// the default test environment has no omp registry module at all
@@ -199,7 +199,7 @@ describe("review 2, finding 7: failing to enforce the live disable is visible", 
 	});
 });
 
-describe("review 2, findings 10 and 14: frame-local failures and wire-format edges", () => {
+describe("frame-local failures and wire-format edges", () => {
 	test("a malformed op is answered and the frames pipelined behind it still run", async () => {
 		const h = await start();
 		const { client, nonce } = await Client.toHost(h);

@@ -541,10 +541,9 @@ class Docs(unittest.TestCase):
         self.assertLess(block.index("purge"), block.index("omp plugin uninstall"))
         self.assertIn("INSTEAD of `uninstall`", text)
 
-    def test_the_review_status_is_not_stale(self):
-        self.assertNotIn(
-            "no independent review has been done", (support.PLUGIN / "docs" / "threat-model.md").read_text().lower()
-        )
+    def test_the_threat_model_states_the_security_status(self):
+        text = (support.PLUGIN / "docs" / "threat-model.md").read_text().lower()
+        self.assertIn("no external penetration test", text)
 
     def test_release_check_requires_the_type_check(self):
         makefile = (support.PLUGIN.parents[1] / "Makefile").read_text()

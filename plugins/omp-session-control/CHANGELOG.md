@@ -5,16 +5,16 @@ only by spec; see `docs/protocol/control-1.md` in the repository.
 
 ## 0.1.0 (2026-11-11)
 
-First release. It includes the fixes from two independent reviews.
+First release.
 
 Watch races:
 
 - A marker, `off` file or directory change made at the moment a directory watch is being armed could be missed (the event
   is lost). The watch is now armed before the state is read, and a bounded recheck every 2 s (through omp's isolated
-  timers, one at a time, only while the directory exists or was in use) covers any event a watch drops. Measured on the
-  previous code: 3 to 20 of 200 immediate markers were never noticed; now 0 of 600.
+  timers, one at a time, only while the directory exists or was in use) covers any event a watch drops. Result: 0 of 600
+  immediate markers missed (a bare watch missed 3 to 20 of 200).
 
-Second review:
+Control directory, operations and wire format:
 
 - A timed-out change keeps the host marked busy until omp actually settles it: later changes get `mutation_pending`
   (new error code), including after an off and on cycle, so a late rename can no longer overwrite a newer one.
@@ -31,7 +31,7 @@ Second review:
 - The conformance suite checks the directory and registry (no symlinks, ownership, modes) before connecting, never
   follows symlinks or blocks on special files, and creates the off marker exclusively.
 
-First review:
+Listener, directory and connections:
 
 - A session branch republishes the registry with the new session id and a higher generation (it was handled like
   nothing happened).

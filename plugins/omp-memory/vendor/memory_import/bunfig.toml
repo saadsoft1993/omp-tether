@@ -1,0 +1,3 @@
+[test]
+# Installs the published Mnemopi library for the tests once, before the first test file (needs the network the first time).
+preload = ["./test/preload.ts"]

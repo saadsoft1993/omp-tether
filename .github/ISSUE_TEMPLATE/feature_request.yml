@@ -11,6 +11,7 @@ body:
         - omp-services
         - omp-private-relay
         - omp-dashboard
+        - omp-memory
         - A new plugin
         - Repository tooling (Makefile, tests, gate)
     validations:

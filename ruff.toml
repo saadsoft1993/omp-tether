@@ -1,6 +1,7 @@
 line-length = 120
 target-version = "py310"
-extend-exclude = ["**/node_modules"]
+# plugins/omp-memory/vendor is copied byte for byte from another repository (tabs, its own style): never reformatted here.
+extend-exclude = ["**/node_modules", "plugins/omp-memory/vendor"]
 
 [lint]
 select = ["F", "E", "W", "I", "UP", "B", "RUF"]
@@ -15,7 +16,9 @@ ignore = [
 # Long user-facing messages and test fixtures that the formatter does not wrap.
 "plugins/omp-services/**" = ["E501"]
 "plugins/omp-dashboard/**" = ["E501"]
+"plugins/omp-memory/**" = ["E501"]
 # The launchers must parse on Python versions older than the supported floor, so that they can say so.
 "plugins/omp-services/python/omp_services_main.py" = ["E501", "UP031", "UP036"]
 "plugins/omp-dashboard/python/omp_dashboard_main.py" = ["E501", "UP031", "UP036"]
+"plugins/omp-memory/python/omp_memory_main.py" = ["E501", "UP031", "UP036"]
 "tools/extension-load-gate/test_gate.py" = ["E501"]

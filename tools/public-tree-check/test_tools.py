@@ -94,13 +94,13 @@ class Base(unittest.TestCase):
 
 class CheckerBlindSpots(Base):
     def test_a_blob_with_a_nul_byte_is_not_skipped(self) -> None:
-        self.repo.write("plugins/p/src/a.ts", b"ok\0 written with " + AI_NAME.encode() + b"\n")
+        self.repo.write("plugins/p/src/a.ts", b"ok\0 pasted from " + AI_NAME.encode() + b"\n")
         self.repo.commit("Add")
         rc, out = self.check()
         self.assertEqual(rc, 1, out)
 
     def test_a_line_that_starts_with_plus_plus_is_scanned_in_history(self) -> None:
-        self.repo.write("plugins/p/src/a.ts", f"++ written with {AI_NAME}\n")
+        self.repo.write("plugins/p/src/a.ts", f"++ pasted from {AI_NAME}\n")
         self.repo.commit("Add")
         self.repo.write("plugins/p/src/a.ts", "clean\n")
         self.repo.commit("Remove")
@@ -176,7 +176,7 @@ class ProvenanceRules(Base):
 
     PHRASES: ClassVar[list[str]] = [
         "model" + " family",
-        "reviewers" + " of different kinds",
+        "review" + "ers of different kinds",
         "a different" + " model checked it",
         "reviewed" + " by an AI",
         "reviewed" + " by a model",
@@ -206,10 +206,131 @@ class ProvenanceRules(Base):
 
     def test_ordinary_review_wording_passes(self) -> None:
         text = (
-            "An independent security review found nothing blocking. Two independent reviews were done, by reviewers "
-            "who were not the authors. The model name is shown in the status line; generated files are not committed."
+            "Please review the dry run before you apply. The model name is shown in the status line; "
+            "generated files are not committed."
         )
         rc, out = self.scan(text)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_description_of_how_the_work_was_reviewed_fails(self) -> None:
+        for phrase in (
+            "Two independent " + "review" + "s were done",
+            "a second " + "review" + "er read the code",
+            "each fix has a " + "failing-" + "first test",
+            "the fixes were " + "re-" + "review" + "ed",
+            "all findings " + "were fixed",
+        ):
+            with self.subTest(phrase=phrase):
+                rc, out = self.scan(f"The plugin: {phrase}.")
+                self.assertEqual(rc, 1, out)
+                self.assertIn("process-narrative", out)
+
+    def test_every_plugin_path_is_scanned_for_it(self) -> None:
+        for name in ("omp-services", "omp-session-control", "omp-private-relay", "omp-dashboard", "omp-memory"):
+            with self.subTest(plugin=name):
+                rc, out = self.scan(
+                    "Two independent " + "reviews were done.", path=f"plugins/{name}/docs/threat-model.md"
+                )
+                self.assertEqual(rc, 1, out)
+
+    NARRATIVES: ClassVar[list[str]] = [
+        "the " + "pre" + "decessor of this tool",
+        "a " + "pre" + "cursor that ran at home",
+        "It " + "general" + "ises a hub",
+        "It " + "general" + "izes a relay",
+        "this " + "grew " + "out of a script",
+        "It was " + "original" + "ly built for one machine",
+        "The " + "first " + "design was different",
+        "An " + "earlier " + "tool of the author's",
+        "it " + "ran for " + "one person",
+        "used " + "before this " + "plugin existed",
+        "This " + "came from a " + "relay that ran at home",
+        "Notes " + "written" + " with a helper",
+        "As " + "we " + "found",
+        "the bug " + "was " + "found in the lock",
+        "changed " + "after " + "testing found a race",
+        "fixed " + "while " + "porting",
+        "a " + "regression " + "for a " + "bug",
+        "see " + "F1" + "/" + "H2",
+        "the " + "second " + "round",
+        "the " + "first " + "round of checks",
+        "kept from the " + "previous " + "round",
+        "added " + "in a later " + "round",
+        "this " + "round",
+        "an " + "earlier " + "debugging failure",
+        "an " + "earlier " + "version of this test",
+        "locks (" + "F07" + ")",
+        "R6 " + "(second " + "round)",
+        "R3 " + "fix",
+        "R3 " + "finding",
+    ]
+
+    def test_each_origin_and_process_phrase_fails_in_docs_comments_and_test_titles(self) -> None:
+        for phrase in self.NARRATIVES:
+            for path, text in (
+                ("plugins/p/docs/notes.md", f"{phrase}."),
+                ("plugins/p/tests/unit/a.test.ts", f"// {phrase}"),
+                ("plugins/p/tests/unit/b.test.ts", f'test("{phrase}", () => {{}});'),
+            ):
+                with self.subTest(phrase=phrase, path=path):
+                    rc, out = self.scan(text, path=path)
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("process-narrative", out)
+                    self.assertNotIn(phrase, out)
+
+    def test_factual_sentences_pass(self) -> None:
+        for text in (
+            "Limitation: only a single account is supported.",
+            "Tested on macOS 27.2 and Ubuntu 24.04.",
+            "Ported to Linux: lsof is replaced by /proc.",
+            "First run: init asks before each step.",
+            "The first version of the protocol is session-control/1.",
+            "The file is found by name in the project directory.",
+            "Fixed width columns are used in the table.",
+            "Reads are bounded, after which the connection is closed.",
+            "A bank is recorded only when it is written without an error.",
+            "Rounds the value up to the next multiple.",
+            "A round trip through the codec is lossless, and this round-trip is tested.",
+            "R2 of the retry table is the backoff row.",
+            "Protocol checks M1 to M3 cover abort, rename and ordering (see control-1).",
+            "Protocol check M1: abort on an idle session returns aborted false.",
+        ):
+            with self.subTest(text=text):
+                rc, out = self.scan(text)
+                self.assertEqual(rc, 0, out)
+
+    def test_protocol_check_ids_in_conformance_code_pass(self) -> None:
+        text = (
+            'await check("M1", "abort on an idle session", () => run());\n'
+            'test("rename collapses runs of spaces", () => {});\n'
+            'describe("M1 to M3: ordered mutations", () => {});'
+        )
+        rc, out = self.scan(text, path="plugins/p/tests/conformance/suite.ts")
+        self.assertEqual(rc, 0, out)
+
+    def test_a_finding_id_opening_a_test_title_fails(self) -> None:
+        for opener in ("test", "it", "describe"):
+            for ident in ("F" + "05", "R" + "6", "H" + "1", "L" + "12", "M" + "4"):
+                with self.subTest(opener=opener, ident=ident):
+                    text = f'{opener}("{ident}: a lock is refused", () => {{}});'
+                    rc, out = self.scan(text, path="plugins/p/tests/unit/a.test.ts")
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("process-narrative", out)
+
+    def test_a_commit_message_with_a_narrative_phrase_fails(self) -> None:
+        self.repo.write("README.md", "Session control for omp.\nMore.\n")
+        self.repo.git("add", "-A")
+        self.repo.git("commit", "-q", "-m", "Docs: " + "an earlier " + "design of the tool")
+        rc, out = self.check()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("process-narrative", out)
+
+    def test_an_older_file_version_in_the_history_is_not_checked_against_it(self) -> None:
+        self.repo.write("docs/a.md", "It " + "general" + "ises a hub.\n")
+        self.repo.commit("Add")
+        self.repo.write("docs/a.md", "A hub.\n")
+        self.repo.commit("Edit")
+        rc, out = self.check()
         self.assertEqual(rc, 0, out)
 
     def test_the_phrase_in_a_commit_message_fails_too(self) -> None:
@@ -413,7 +534,7 @@ class PrivateNamesStayOutOfDiagnostics(Base):
         self.assertIn("bigbox-7", out)
 
     def test_a_finding_inside_a_privately_named_file_does_not_print_the_file_name(self) -> None:
-        self.repo.write("plugins/p/src/bigbox-7.ts", f"// written with {AI_NAME}\n")
+        self.repo.write("plugins/p/src/bigbox-7.ts", f"// pasted from {AI_NAME}\n")
         self.repo.commit("Add")
         rc, out = self.check("--private-terms", str(self.terms))
         self.assertEqual(rc, 1, out)

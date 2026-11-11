@@ -29,18 +29,24 @@ built with the same Bun gives the same content hash, which a release job compare
 
 Tested with omp 18.18.0 and 18.18.3. It uses omp through its command line only (`omp --version`, `omp collab list --json` and `omp collab link --json` at JSON version 1, `omp config get`), plus `session-control/1` for Stop and Rename and `relay-check/1` for the relay. `doctor` fails on an omp older than 18.18.0 and warns on a version not listed in `ompTested`. The dashboard page is built with Bun and committed, pinned by hashes (`plugins/omp-dashboard/ui-build.json`). Sign-in adapters (`auth.adapter`): `loopback-only`, `tailscale-serve` and, from 0.2.0, `both` (the local address and Tailscale Serve at once); config schema 1 is unchanged in shape, `both` is one more allowed value.
 
+### `omp-memory`
+
+Tested with the real binaries of **omp 18.18.0** (the Mac mini) and **18.18.3** (the MacBook). Every published `@oh-my-pi/pi-mnemopi` from **18.18.0 to 18.18.8** passes the structural SQL check, the write test and the importer's Bun suite (210 tests; `bun verify_versions.ts --suite`, run again after the last change to the write path). The importer writes through the published `@oh-my-pi/pi-mnemopi` at **exactly omp's version** (omp's plugin directory, or installed once by `omp-memory setup`; see `ompInterfaces` in `compat.json`) and refuses any other version, a patch release included, naming the `setup` command; there is no override. Before a write the library must also pass a write test in a scratch bank; a failure names the step. A version that has not been listed above is accepted only if it passes that test. The structural SQL check looks for the statements the importer relies on in the package and, when it is big enough to scan, in the omp binary; when it cannot be scanned `doctor` warns and does not claim parity.
+
+**Tested** on **macOS arm64** (MacBook and Mac mini) and in an **Ubuntu 24.04 arm64 container** as a non-root user; **not tested** on Linux x64, on a Linux whose userland is neither GNU nor BSD (musl, busybox), or with other omp versions. Windows is not supported. On Linux x64, the install script of `onnxruntime-node` (fetched by `setup` through omp's library) downloads CUDA binaries from GitHub unless `ONNXRUNTIME_NODE_INSTALL_CUDA=skip` is set; that was read from the script and not run.
+
 ## Bun
 
-The extension runs on the Bun that omp embeds (1.4.4 in omp 18.18.0). So does `omp-private-relay`: it runs as `BUN_BE_BUN=1 <omp> <script>`, never needs a separate Bun or Node, and refuses to start on a Bun older than 1.4.4 (the version collab-web's build needs). Running the tests here needs Bun 1.4.4 or newer.
+The extension runs on the Bun that omp embeds (1.4.4 in omp 18.18.0). `omp-memory`'s importer runs on a Bun 1.4.4 or newer that it finds on `PATH` or in the usual places (never the omp binary: the importer runs `omp --version` itself). So does `omp-private-relay`: it runs as `BUN_BE_BUN=1 <omp> <script>`, never needs a separate Bun or Node, and refuses to start on a Bun older than 1.4.4 (the version collab-web's build needs). Running the tests here needs Bun 1.4.4 or newer.
 
 ## Python
 
-`omp-services` and `omp-dashboard` need Python 3.10 or newer and no third-party packages. It is tested on 3.10 and 3.14 on macOS and on
-Ubuntu. macOS's own `/usr/bin/python3` is 3.9 and is refused with a message that says what to install.
+`omp-services` and `omp-dashboard` need Python 3.10 or newer and no third-party packages; they are tested on 3.10 and 3.14 on macOS and on Ubuntu. `omp-memory` needs Python 3.10 or newer, standard library only, and was run on 3.14 (macOS) and 3.13 (Debian 13).
+macOS's own `/usr/bin/python3` is 3.9 and is refused with a message that says what to install.
 
 ## Platforms
 
-macOS and Linux. Not Windows: omp uses named pipes there, and this repository's plugins use Unix sockets. Listener ownership checks use `lsof` on macOS and `/proc/net/tcp` (or `ss`) on Linux. Tailscale Serve's header behaviour was tested against a real Serve on macOS (Tailscale 1.104.5: a caller-sent `Tailscale-User-Login` is replaced, a caller-sent Funnel header is removed); the `both` adapter was also run against a real Serve route on macOS (Tailscale 1.104.4) with the local address, the tailnet name and Tailscale stopped. Not tested on Linux, and not with a real non-owner tailnet identity.
+macOS and Linux (`omp-memory`: macOS arm64 and an Ubuntu 24.04 arm64 container were run; Linux x64, musl and busybox were not, see `platformsTested` and `platformsNotTested` in `compat.json`; its scripts use POSIX tools plus `sqlite3` and `shasum` or `sha256sum`, and it finds open banks with `lsof` or, on Linux without it, `/proc`). Not Windows: omp uses named pipes there, and this repository's plugins use Unix sockets. Listener ownership checks use `lsof` on macOS and `/proc/net/tcp` (or `ss`) on Linux. Tailscale Serve's header behaviour was tested against a real Serve on macOS (Tailscale 1.104.5: a caller-sent `Tailscale-User-Login` is replaced, a caller-sent Funnel header is removed); the `both` adapter was also run against a real Serve route on macOS (Tailscale 1.104.4) with the local address, the tailnet name and Tailscale stopped. Not tested on Linux, and not with a real non-owner tailnet identity.
 
 ## Protocols
 
