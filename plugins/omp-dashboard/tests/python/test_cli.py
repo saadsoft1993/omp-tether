@@ -384,6 +384,16 @@ class Doctor(ScratchTestCase):
         s.save_fake()
         self.assertEqual(self.findings(s)["collab"].level, "fail")
 
+    def test_an_omp_older_than_the_tested_version_is_not_called_newer(self) -> None:
+        s = self.make()
+        s.fake_state["version"] = "omp/18.18.0"  # at the supported minimum, below the tested 18.18.3
+        s.save_fake()
+        finding = self.findings(s)["omp"]
+        self.assertEqual(finding.level, "warn")
+        self.assertNotIn("newer", finding.message)
+        self.assertIn("18.18.0", finding.message)
+        self.assertIn("not one of the versions", finding.message)
+
     def test_a_hub_that_is_running_and_a_port_held_by_someone_else(self) -> None:
         s = self.make()
         proc = run_hub_process(s)

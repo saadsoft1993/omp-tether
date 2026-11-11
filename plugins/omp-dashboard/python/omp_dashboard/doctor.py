@@ -315,7 +315,7 @@ def _omp(omp: Omp, config: Config, env: Mapping[str, str]) -> list[Finding]:
             _f(
                 "omp",
                 WARN,
-                f"omp {'.'.join(map(str, version))} is newer than the versions this dashboard was tested with ({', '.join(TESTED_OMP)})",
+                f"omp {'.'.join(map(str, version))} is supported but not one of the versions this dashboard was tested with ({', '.join(TESTED_OMP)})",
             )
         )
     else:

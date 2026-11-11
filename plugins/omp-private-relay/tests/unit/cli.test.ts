@@ -93,6 +93,14 @@ describe("help and unknown commands", () => {
 		expect(await runCli(["frobnicate"], {}, b)).toBe(2);
 		expect(b.stderr).toContain("unknown command");
 	});
+	test("--help and -h are help, not an unknown command: exit 0 with the command list", async () => {
+		for (const flag of ["--help", "-h"]) {
+			const a = io();
+			expect(await runCli([flag], {}, a)).toBe(0);
+			expect(a.stdout).toContain("init");
+			expect(a.stderr).toBe("");
+		}
+	});
 });
 
 describe("init", () => {

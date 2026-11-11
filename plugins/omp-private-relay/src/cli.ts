@@ -532,6 +532,10 @@ export async function runCli(argv: string[], env: Env, io: Io, deps: CliDeps = {
 		return 2;
 	}
 	const command = args.positional[0];
+	if (args.flags.has("help") || command === "-h") {
+		io.out(HELP);
+		return 0;
+	}
 	try {
 		switch (command) {
 			case "init":
