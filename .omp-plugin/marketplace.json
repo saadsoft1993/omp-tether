@@ -27,7 +27,7 @@
 		{
 			"name": "omp-private-relay",
 			"source": "./plugins/omp-private-relay",
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"description": "A Collab relay that runs on your own machine, with a patched browser client and per-browser pairing, so session links never go through omp's public relay. Does nothing until you run its init.",
 			"license": "MIT",
 			"category": "productivity",

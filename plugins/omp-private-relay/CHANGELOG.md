@@ -3,6 +3,12 @@
 All notable changes to `omp-private-relay`. The protocols it implements have their own numbers (`pairing-store/1`,
 `relay-check/1`) and change only by spec; see `docs/protocol/` in the repository.
 
+## 0.1.2 (2026-11-12)
+
+The web client asset is unchanged (`omp-private-relay-web-18.18.tar`, same pin, still published with the `omp-private-relay-v0.1.0` release).
+
+- `init --yes` no longer waits forever when its input is open but is not a terminal (a script, a service, a pipe that is never closed). The one question `--yes` does not cover, whether to point omp's own settings at the relay, is now answered with a no ("no answer: not done") instead of waiting for a line that never comes. With a terminal, or with input that ends, nothing changes.
+
 ## 0.1.1 (2026-11-11)
 
 The web client asset is unchanged (`omp-private-relay-web-18.18.tar`, same pin, still published with the `omp-private-relay-v0.1.0` release).

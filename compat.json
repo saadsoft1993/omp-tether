@@ -61,7 +61,7 @@
 			"note": "The command line also reads omp's cached marketplace catalog (<plugins root>/cache/marketplaces/<name>/marketplace.json), found from the installPath that `omp plugin list --json` reports."
 		},
 		"omp-private-relay": {
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"protocols": ["pairing-store/1", "relay-check/1"],
 			"platforms": ["darwin", "linux"],
 			"ompTested": ["18.18.0", "18.18.3"],
