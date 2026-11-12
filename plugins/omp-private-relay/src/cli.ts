@@ -34,6 +34,8 @@ export interface Io {
 	err(text: string): void;
 	/** Next line typed by the user, or null at end of input. */
 	line(): Promise<string | null>;
+	/** False when input is not a terminal that someone is typing at (a service, a pipe that stays open): nothing is waited for. */
+	interactive?: boolean;
 }
 
 interface Args {
@@ -101,7 +103,8 @@ class Prompter {
 			return true;
 		}
 		this.io.out(`${question} [y/N] `);
-		const answer = await this.io.line();
+		// --yes with no terminal behind it (a script, a service): a question that --yes does not cover is a no, not a wait.
+		const answer = this.yes && this.io.interactive === false ? null : await this.io.line();
 		this.io.out(answer === null ? "\n(no answer: not done)\n" : "");
 		return answer !== null && /^y(es)?$/i.test(answer.trim());
 	}
@@ -596,6 +599,7 @@ if (import.meta.main) {
 	const io: Io = {
 		out: text => process.stdout.write(text),
 		err: text => process.stderr.write(text),
+		interactive: Boolean(process.stdin.isTTY),
 		line: async () => {
 			const next = await lines.next();
 			return next.done ? null : next.value;

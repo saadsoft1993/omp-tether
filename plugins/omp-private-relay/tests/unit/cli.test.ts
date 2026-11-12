@@ -130,6 +130,18 @@ describe("init", () => {
 		expect(snapshot(root).filter(p => !p.startsWith("home") && !p.startsWith("fake bin") && p !== "fake-omp.log" && p !== "asset.tar")).toEqual([]);
 	});
 
+	test("--yes with input that is not a terminal and never ends answers the omp-settings question with a no instead of waiting", async () => {
+		const { builds, tar } = pinned();
+		const { root, env } = setup();
+		const asset = path.join(root, "asset.tar");
+		fs.writeFileSync(asset, tar);
+		const out = Object.assign(io(), { interactive: false, line: () => new Promise<string | null>(() => {}) });
+		const [host, guest] = await freePorts(2);
+		const code = await runCli(["init", "--yes", "--asset-file", asset, "--host-port", String(host), "--guest-port", String(guest)], env, out, { builds });
+		expect(code).toBe(0);
+		expect(out.stdout).toContain("(no answer: not done)");
+	}, 10_000);
+
 	test("without --yes, nothing is written until it is asked and answered yes; a no (or no answer) writes nothing at all", async () => {
 		const { builds } = pinned();
 		const { home, env } = setup();
