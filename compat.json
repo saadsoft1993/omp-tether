@@ -2,7 +2,7 @@
 	"schema": 1,
 	"omp": {
 		"minimum": "18.18.0",
-		"tested": ["18.18.0"],
+		"tested": ["18.18.0", "18.19.0"],
 		"note": "`tested` is the list for omp-session-control and omp-services; omp-private-relay and omp-dashboard list theirs as `ompTested` under `plugins`. Only listed versions have been run. Newer versions are expected to work but are untested until listed."
 	},
 	"bun": {
