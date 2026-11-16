@@ -90,7 +90,7 @@ them, close the listener, unlink the socket and the registry entry.
 | `generation` | starts at 0 and increases by 1 each time the session switches to another session (`/new`, `/resume`, `/fork`, a branch) in the same process. The registry is rewritten at every switch and every branch |
 | `plugin` | informational |
 | `ops` | the operations this session answers, the same list as `snapshot.ops`. `plan-review` and `plan-answer` are listed only when the host omp has both `getPendingPlanReview` and `resolvePlanReview` (see Capability below). A registry with no `ops` field (plugin 0.1.x) means `snapshot`, `abort` and `rename` only |
-| `planReview` | `null`, or `{reviewId, title, openedAt}` for the interactive plan review that is open now: `reviewId` is at most 128 characters, `title` at most 200 code points (cut so that the whole file stays within 4096 bytes), `openedAt` is the ISO-8601 UTC time the plugin first saw the review. Present on every registry of a 0.2.0 plugin; a client MUST treat a missing field as `null`. The registry is rewritten when a review opens, changes or closes |
+| `planReview` | `null`, or `{reviewId, title, openedAt}` for the interactive plan review that is open now: `reviewId` is at most 128 UTF-16 units, `title` at most 200 UTF-16 code units (cut so that the whole file stays within 4096 bytes), `openedAt` is the ISO-8601 UTC time the plugin first saw the review. Present on every registry of a 0.2.0 plugin; a client MUST treat a missing field as `null`. The registry is rewritten when a review opens, changes or closes |
 
 A client MUST ignore fields it does not know. Entries whose `pid` no longer exists are left behind by crashed sessions;
 a starting session removes them (and their sockets), and a client MAY ignore them.
@@ -233,10 +233,10 @@ Changes the session; needs `sessionId` and `generation`; serialized with the oth
 
 | Arg | Rule |
 |---|---|
-| `reviewId` | string, 1 to 128 characters; the review being answered |
+| `reviewId` | string, 1 to 128 UTF-16 units; the review being answered |
 | `choice` | `execute`, `compact`, `keep`, `refine` or `save` |
-| `feedback` | optional string of at most 8000 code points; REQUIRED and non-blank for `refine` (sent verbatim as the next planning prompt); ignored for the other choices |
-| `role` | optional string of 1 to 64 characters; only with `execute`, `compact` or `keep`, and it MUST name a `role` in the review's `tiers`. Without it the approval runs on the tier selected in the terminal |
+| `feedback` | optional string of at most 8000 UTF-16 code units (JavaScript `.length`); REQUIRED and non-blank for `refine` (sent verbatim as the next planning prompt); ignored for the other choices |
+| `role` | optional string of 1 to 64 UTF-16 units; only with `execute`, `compact` or `keep`, and it MUST name a `role` in the review's `tiers`. Without it the approval runs on the tier selected in the terminal |
 
 Any other argument problem is `invalid_args`. Then the plugin calls the host's `resolvePlanReview`, once and never
 retried; result `{"accepted": true}`. When the review is closed, was replaced by another `reviewId`, the choice is
@@ -258,10 +258,10 @@ plan mode and clears into a new session (the omp process keeps running).
 | Open connections | at most 16 in total, accepted or turned away; beyond that a connection is dropped without a reply. A connection that was sent a final frame (`closing`, `too_many_clients`, `disabled`, `too_large`) is destroyed once the frame is flushed or after 2 s, whichever is first |
 | Unread replies | a client that lets more than 256 KiB of replies pile up unread is disconnected |
 | Name | 120 characters |
-| Plan review id | 128 characters |
-| Registry title | 200 code points, shortened further if the registry would pass 4096 bytes |
-| Plan feedback | 8000 code points |
-| Plan role | 64 characters |
+| Plan review id | 128 UTF-16 units |
+| Registry title | 200 UTF-16 units, never splitting a surrogate pair; shortened further if the registry would pass 4096 bytes |
+| Plan feedback | 8000 UTF-16 units |
+| Plan role | 64 UTF-16 units |
 | Registry entry | 4096 bytes |
 | Reply `id` | an `id` that is not a string of at most 128 characters or a finite number is never echoed: the reply has `id: null`. Requests with such an id get `bad_request` |
 | Reply size | a reply never exceeds a frame (65 536 bytes); a reply that would is replaced by an `internal` error (`plan-review` sizes its chunk so that it does not). Rejected input (an unknown op name, an over-long id) is never reflected in a reply |

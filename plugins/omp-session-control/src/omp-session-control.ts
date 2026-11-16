@@ -418,13 +418,6 @@ function planHost(c: unknown): PlanHost | undefined {
 
 const isHigh = (unit: number): boolean => unit >= 0xd800 && unit <= 0xdbff;
 const isLow = (unit: number): boolean => unit >= 0xdc00 && unit <= 0xdfff;
-/** Length in code points, the unit the protocol's text limits use. */
-const codePoints = (text: string): number => {
-	let n = 0;
-	for (const _ of text) n += 1;
-	return n;
-};
-
 /** A review from the host, or undefined when it is not usable (wrong shape, an id the protocol cannot carry back). */
 function readReview(value: unknown): Omit<PlanReview, "openedAt"> | undefined {
 	if (!value || typeof value !== "object") return undefined;
@@ -462,10 +455,17 @@ function readReview(value: unknown): Omit<PlanReview, "openedAt"> | undefined {
 	};
 }
 
-/** The longest prefix of `title`, in code points, for which `fits` holds; undefined when not even "" fits. */
+/** The longest prefix of `title` (at most 200 UTF-16 units, never splitting a surrogate pair) for which `fits` holds; undefined when not even "" fits. */
 export function fitTitle(title: string, fits: (t: string) => boolean): string | undefined {
 	if (!fits("")) return undefined;
-	const points = Array.from(title).slice(0, MAX_REGISTRY_TITLE_CHARS);
+	// Limits are counted in UTF-16 units (JS .length), like every other limit; whole code points only, never half a pair.
+	const points: string[] = [];
+	let units = 0;
+	for (const point of title) {
+		units += point.length;
+		if (units > MAX_REGISTRY_TITLE_CHARS) break;
+		points.push(point);
+	}
 	let lo = 0;
 	let hi = points.length;
 	while (lo < hi) {
@@ -909,7 +909,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		if (typeof choice !== "string" || !PLAN_CHOICES.includes(choice as PlanChoice)) {
 			throw new ControlError("invalid_args", `choice must be one of ${PLAN_CHOICES.join(", ")}`);
 		}
-		if (feedback !== undefined && (typeof feedback !== "string" || codePoints(feedback) > MAX_FEEDBACK_CHARS)) {
+		if (feedback !== undefined && (typeof feedback !== "string" || feedback.length > MAX_FEEDBACK_CHARS)) {
 			throw new ControlError("invalid_args", `feedback must be a string of at most ${MAX_FEEDBACK_CHARS} characters`);
 		}
 		if (choice === "refine" && (typeof feedback !== "string" || feedback.trim() === "")) {

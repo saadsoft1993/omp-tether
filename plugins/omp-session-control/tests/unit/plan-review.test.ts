@@ -171,6 +171,11 @@ describe("tracking", () => {
 		expect(fitTitle("😀😀😀", t => t.length <= 3)).toBe("😀"); // never half a pair
 		expect(fitTitle("abc", () => false)).toBeUndefined();
 		expect(fitTitle("x".repeat(500), () => true)).toBe("x".repeat(200));
+		expect(fitTitle("😀".repeat(200), () => true)).toBe("😀".repeat(100)); // 200 units, not 200 code points
+		const edge = fitTitle(`${"x".repeat(199)}😀tail`, () => true) as string; // the pair straddles unit 200
+		expect(edge).toBe("x".repeat(199));
+		expect(edge.isWellFormed()).toBe(true);
+		expect(fitTitle(`${"x".repeat(198)}😀tail`, () => true)).toBe(`${"x".repeat(198)}😀`); // ends exactly at 200
 	});
 });
 
@@ -355,7 +360,7 @@ describe("plan-answer", () => {
 		await invalid({ reviewId: review.reviewId, choice: "refine", feedback: "   \n\t" });
 		await invalid({ reviewId: review.reviewId, choice: "refine", feedback: 5 });
 		await invalid({ reviewId: review.reviewId, choice: "refine", feedback: "x".repeat(8001) });
-		await invalid({ reviewId: review.reviewId, choice: "refine", feedback: "😀".repeat(8001) });
+		await invalid({ reviewId: review.reviewId, choice: "refine", feedback: "😀".repeat(4001) }); // 8002 UTF-16 units
 		await invalid({ reviewId: review.reviewId, choice: "execute", feedback: 5 });
 		await invalid({ reviewId: review.reviewId, choice: "refine", feedback: "ok", role: "smol" }); // role with refine
 		await invalid({ reviewId: review.reviewId, choice: "save", role: "smol" });
@@ -365,8 +370,23 @@ describe("plan-answer", () => {
 		await invalid({ reviewId: review.reviewId, choice: "execute", role: "r".repeat(65) });
 	});
 
-	test("the limits are inclusive: 8000 characters of feedback (code points) work", async () => {
-		expect((await answer({ reviewId: review.reviewId, choice: "refine", feedback: "😀".repeat(8000) })).ok).toBe(true);
+	test("limits are UTF-16 units and inclusive: 8000 ASCII and 4000 emoji pass, 8001 and 4001 do not", async () => {
+		expect((await answer({ reviewId: review.reviewId, choice: "refine", feedback: "x".repeat(8000) })).ok).toBe(true);
+		const next = await host.openReview();
+		expect((await answer({ reviewId: next.reviewId, choice: "refine", feedback: "😀".repeat(4000) })).ok).toBe(true);
+		const last = await host.openReview();
+		for (const feedback of ["x".repeat(8001), "😀".repeat(4000) + "x", "😀".repeat(4001)]) {
+			expect((await answer({ reviewId: last.reviewId, choice: "refine", feedback })).code).toBe("invalid_args");
+		}
+	});
+
+	test("the registry title is cut at 200 UTF-16 units without splitting an emoji", async () => {
+		await host.openReview({ title: "😀".repeat(200) });
+		expect((registryPlan() as { title: string }).title).toBe("😀".repeat(100));
+		await host.openReview({ title: `${"x".repeat(199)}😀` });
+		const title = (registryPlan() as { title: string }).title;
+		expect(title).toBe("x".repeat(199));
+		expect(title.isWellFormed()).toBe(true);
 	});
 
 	test("a role with no tiers in the review is refused", async () => {
