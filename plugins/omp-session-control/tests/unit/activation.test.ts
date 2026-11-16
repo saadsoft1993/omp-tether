@@ -232,7 +232,7 @@ describe("/session-control", () => {
 		const h = await start();
 		await h.fire("session_start");
 		const text = await h.run("session-control", "status");
-		expect(text).toContain("omp-session-control 0.1.0");
+		expect(text).toContain("omp-session-control 0.2.0");
 		expect(text).toContain(h.dir);
 		expect(text).toContain("inert");
 		expect(await h.run("session-control", "")).toContain("inert");

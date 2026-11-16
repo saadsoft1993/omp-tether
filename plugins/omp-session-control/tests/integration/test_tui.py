@@ -119,10 +119,10 @@ class SessionControlInRealOmp(unittest.TestCase):
         regs = registries(self.ctl_dir, self.omp.pid)
         return regs[0] if len(regs) == 1 else None
 
-    def op(self, op: str, args: dict | None = None) -> dict:
+    def raw_op(self, op: str, args: dict | None = None) -> dict:
         reg = self.reg()
         assert reg, "no registry"
-        reply = request(
+        return request(
             reg,
             {
                 "v": 1,
@@ -134,8 +134,42 @@ class SessionControlInRealOmp(unittest.TestCase):
                 **({"args": args} if args is not None else {}),
             },
         )
+
+    def op(self, op: str, args: dict | None = None) -> dict:
+        reply = self.raw_op(op, args)
         self.assertTrue(reply["ok"], reply)
         return reply["result"]
+
+    def read_plan(self) -> dict:
+        """The open review's metadata and its whole plan text, read through the cursor."""
+        offset, text, meta = 0, "", None
+        for _ in range(50):
+            part = self.op("plan-review", {"offset": offset})
+            if not part["open"]:
+                return part
+            meta = meta or part
+            self.assertEqual(
+                (part["reviewId"], part["total"], part["offset"]), (meta["reviewId"], meta["total"], offset)
+            )
+            text += part["chunk"]
+            offset = part["nextOffset"]
+            if part["done"]:
+                self.assertEqual(len(text.encode("utf-16-le")) // 2, meta["total"])
+                return {**meta, "planContent": text}
+        raise AssertionError("the plan cursor never finished")
+
+    def open_review(self, previous: str | None = None) -> dict:
+        """Opens the plan review in the terminal (/plan-review) and waits until the registry shows a new one."""
+        self.omp.type("/plan-review")
+        return kit.wait_for(
+            lambda: (
+                lambda r: r["planReview"]
+                if r and r.get("planReview") and r["planReview"]["reviewId"] != previous
+                else None
+            )(self.reg()),
+            timeout=45,
+            what="the plan review in the registry",
+        )
 
     def snapshot(self) -> dict:
         reg = self.reg()
@@ -151,7 +185,7 @@ class SessionControlInRealOmp(unittest.TestCase):
         self.assertFalse((self.scratch.home / ".config").exists(), "installing must not create anything outside ~/.omp")
         self.omp.type("/session-control status")
         kit.wait_for(lambda: "inert" in self.omp.text(), timeout=20, what="the status text")
-        self.assertIn("omp-session-control 0.1.0", self.omp.text())
+        self.assertIn("omp-session-control 0.2.0", self.omp.text())
         self.assertFalse((self.scratch.home / ".config").exists(), "status must not create anything either")
 
     def test_01_on_command_enables_this_session(self) -> None:
@@ -286,6 +320,79 @@ class SessionControlInRealOmp(unittest.TestCase):
             lambda: not registries(directory, second.pid), timeout=15, what="the second session's registry to go"
         )
         self.assertEqual([r["pid"] for r in registries(directory)], [self.omp.pid])
+
+    def test_70_a_plan_review_is_read_and_answered_over_the_socket(self) -> None:
+        reg = self.reg()
+        assert reg
+        self.assertEqual(reg["ops"], ["snapshot", "abort", "rename", "plan-review", "plan-answer"])
+        self.assertIsNone(reg["planReview"])
+        self.assertEqual(self.op("plan-review", {"offset": 0}), {"open": False})
+        self.omp.type("/plan")
+        kit.wait_for(
+            lambda: "Plan mode" in self.omp.text() or "plan mode" in self.omp.text(), timeout=30, what="plan mode"
+        )
+        # omp reviews the newest local://*plan.md of the session: write one where the session keeps its local files.
+        files = list((self.scratch.home / ".omp" / "agent" / "sessions").rglob("*.jsonl"))
+        self.assertEqual(len(files), 1)
+        local = files[0].with_suffix("") / "local"
+        local.mkdir(parents=True, exist_ok=True)
+        plan = "# Probe plan\n\n" + "".join(
+            f"{i}. step with \u201cquotes\u201d and \u8ba1\u5212 \U0001f600\n" for i in range(6000)
+        )
+        (local / "probe-plan.md").write_text(plan, encoding="utf-8")
+
+        first = self.open_review()
+        self.assertTrue(first["title"])  # omp derives it (here from the file name)
+        read = self.read_plan()
+        self.assertEqual(read["reviewId"], first["reviewId"])
+        self.assertEqual(read["planContent"], plan)
+        self.assertEqual(read["planFilePath"], "local://probe-plan.md")
+        self.assertEqual([o["id"] for o in read["options"]], ["execute", "compact", "keep", "refine", "save"])
+        self.assertTrue(all(isinstance(o["label"], str) and not o["disabled"] for o in read["options"]))
+        self.assertGreater(len(plan), 150_000)
+
+        # refusals first: nothing may change in the terminal
+        self.assertEqual(
+            self.raw_op("plan-answer", {"reviewId": first["reviewId"], "choice": "refine"})["code"], "invalid_args"
+        )
+        self.assertEqual(
+            self.raw_op("plan-answer", {"reviewId": "not-the-review", "choice": "execute"})["code"], "not_accepted"
+        )
+        self.assertEqual(self.reg()["planReview"]["reviewId"], first["reviewId"])
+
+        # refine sends the feedback as the next planning prompt: the fake provider is asked again
+        calls = self.scratch.root / "provider-calls.jsonl"
+        before = len(calls.read_text().splitlines()) if calls.exists() else 0
+        self.assertEqual(
+            self.op(
+                "plan-answer",
+                {"reviewId": first["reviewId"], "choice": "refine", "feedback": "PROBE-FEEDBACK make it shorter"},
+            ),
+            {"accepted": True},
+        )
+        kit.wait_for(lambda: self.reg() and self.reg()["planReview"] is None, timeout=30, what="the review to close")
+        kit.wait_for(
+            lambda: "PROBE-FEEDBACK" in (calls.read_text() if calls.exists() else "")
+            and len(calls.read_text().splitlines()) > before,
+            timeout=45,
+            what="the feedback to reach the model",
+        )
+        kit.wait_for(lambda: self.snapshot()["busy"] is False, timeout=30, what="the refine turn to end")
+
+        # a second review, answered with execute
+        second = self.open_review(previous=first["reviewId"])
+        self.assertNotEqual(second["reviewId"], first["reviewId"])
+        self.assertEqual(self.read_plan()["reviewId"], second["reviewId"])
+        self.assertEqual(
+            self.op("plan-answer", {"reviewId": second["reviewId"], "choice": "execute"}), {"accepted": True}
+        )
+        kit.wait_for(lambda: self.reg() and self.reg()["planReview"] is None, timeout=30, what="the review to close")
+        # answering again is refused: the terminal no longer has that review
+        self.assertEqual(
+            self.raw_op("plan-answer", {"reviewId": second["reviewId"], "choice": "execute"})["code"], "not_accepted"
+        )
+        self.assertTrue(self.omp.alive())
+        self.assertNotIn("PROBE-FEEDBACK", (self.ctl_dir / "events.log").read_text())
 
     def test_90_exit_closes_the_socket_and_removes_the_registry(self) -> None:
         reg = self.reg()

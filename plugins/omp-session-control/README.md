@@ -1,9 +1,9 @@
 # omp-session-control
 
 An [omp](https://github.com/can1357/oh-my-pi) extension that lets a program on your own machine **stop the running turn**
-of an interactive omp session and **rename** it, over a private Unix socket. It is the session-side half of a local
+of an interactive omp session, **rename** it and **answer its plan review**, over a private Unix socket. It is the session-side half of a local
 dashboard: the dashboard lists your sessions and gets a Stop and a Rename button; this extension does the stopping and
-renaming inside the session.
+renaming inside the session, and, from 0.2.0, shows a pending plan review and answers it.
 
 - **Inert until you turn it on.** Installing it changes nothing. It creates no files and opens no socket until you
   enable it (below). It registers one slash command, `/session-control`, and, when the control directory already exists,
@@ -17,7 +17,7 @@ renaming inside the session.
 - **A documented protocol.** [`docs/protocol/control-1.md`](../../docs/protocol/control-1.md) specifies it, and a
   conformance suite checks any implementation against it, so you can write your own client.
 
-Supported: macOS and Linux, with omp 18.18.0 or newer (tested on 18.18.0). Not supported: Windows (omp uses named pipes
+Supported: macOS and Linux, with omp 18.18.0 or newer (tested on 18.18.0). Plan review needs an omp that has `ctx.getPendingPlanReview` and `ctx.resolvePlanReview` (18.19.0 does); on an older omp the other operations work and the plan operations are simply not offered. Not supported: Windows (omp uses named pipes
 there; this extension uses Unix sockets).
 
 ## Install
@@ -73,25 +73,29 @@ omp plugin config delete omp-session-control controlDir     # only if you had se
 
 ## What it exposes
 
-Three operations, nothing else:
-
 | Op | Does |
 |---|---|
-| `snapshot` | Returns the session id, a generation counter, the name (omp may derive it from your first message), whether a turn is running, the process id and the protocol it speaks |
+| `snapshot` | Returns the session id, a generation counter, the name (omp may derive it from your first message), whether a turn is running, the process id, the protocol it speaks and the operations it offers |
 | `abort` | Stops the running turn, like pressing Esc. Does nothing when idle |
 | `rename` | Sets the session name (1 to 120 characters; control and invisible characters are refused) |
+| `plan-review` | While a plan review is open in the terminal: its title, plan file path, choices, execution tiers and the **full text of the plan as proposed**, in chunks |
+| `plan-answer` | Answers that review as if you had picked the choice in the terminal: approve and execute, approve and compact, approve and keep context, refine (with feedback) or save and quit |
 
-It cannot read the conversation, run commands, send prompts or change files. Changing operations must carry the live
-session id and generation, so a dashboard that looked at a session before you switched it (`/new`, `/resume`) cannot rename
-or stop the new one by accident.
+**Approving a plan starts executing it** in that session, so a client that can use `plan-answer` can make the session
+act. It still cannot read the rest of the conversation, run commands itself, send arbitrary prompts or change files or
+settings; but the plan text itself can contain whatever the model put in it, and the registry shows the review's title
+to anything that can read the control directory. Edits you make inside the terminal's review overlay are not visible
+through the socket, and an approval uses the edited text. Changing operations (and `plan-review`) must carry the live
+session id and generation, so a dashboard that looked at a session before you switched it (`/new`, `/resume`) cannot
+rename, stop or answer the new one by accident.
 
 ## The same-user caveat
 
 The access control is the directory mode. The runtime exposes no peer credentials on a Unix socket, so the extension
 cannot tell *which* process connected, only that it could enter a `0700` directory in your home, which means it runs as
 you (or as root). A process that runs as you can already read your session files, kill omp, and run anything you can.
-So this extension adds no new power for such a process, but it does add a convenient way to **stop and rename** your
-sessions. If you share a Unix account with people you do not trust, do not enable it. Machines where several people
+So this extension adds no capability such a process lacks, but it does add a convenient way to **stop, rename and,
+with a plan review open, read and approve** your sessions. If you share a Unix account with people you do not trust, do not enable it. Machines where several people
 have separate accounts are not a supported setup: the directory permissions should keep the other accounts out, but that
 has not been checked on shared or network-mounted homes (a home shared between machines or containers can also make
 one session delete another's files, because liveness is judged by process id). Full reasoning:

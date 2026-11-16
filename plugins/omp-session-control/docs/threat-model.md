@@ -9,16 +9,23 @@ are the author's judgement. Read the source, it is one file.
 ## What it is, and what it gives an attacker
 
 An extension that runs **inside** every interactive omp session, with no sandbox (omp extensions have none). When you
-enable it, the session listens on a Unix socket and answers three requests: `snapshot` (session id, generation, name,
-busy flag, process id), `abort` (stop the running turn) and `rename`.
+enable it, the session listens on a Unix socket and answers up to five requests: `snapshot` (session id, generation, name,
+busy flag, process id, offered operations), `abort` (stop the running turn), `rename`, and, from 0.2.0 on an omp that has
+the plan-review methods, `plan-review` (read the open plan review) and `plan-answer` (answer it).
 
-What control over the socket gives: stopping the turn a session is running, changing its title, and reading the title. omp
-may derive the title from your first message, so it can contain text you typed. It does **not** give
-reading the conversation, sending prompts, running commands, reading or writing files, or changing settings.
+What control over the socket gives: stopping the turn a session is running, changing its title, reading the title (omp may
+derive it from your first message, so it can contain text you typed), and, **while an interactive plan review is open**,
+reading the review (title, plan file path, choices, execution tiers and the full plan text as proposed) and answering
+it. An answer is the same as a pick in the terminal: **approve (execute, compact, keep context) starts executing the
+plan in that session**; refine sends the given feedback to the model as the next planning prompt; save writes the plan
+to its default file, leaves plan mode and clears into a new session. It does **not** give reading the rest of the
+conversation, sending arbitrary prompts, running commands directly, reading or writing files, or changing settings.
 
 Worst realistic outcome of someone controlling the socket: they interrupt your running turns again and again, put a
-misleading title on a session, or read session titles (which omp may derive from your first message). The first two are
-annoying; reading a title discloses that text to the process asking. None of it runs code or exposes the conversation.
+misleading title on a session, read session titles and open plan texts (a plan can quote file contents, paths or
+commands the model saw), or approve a plan you had not yet read, which makes the session carry it out with the
+permissions that session has. That last one is the largest change from 0.1.0: the socket can now cause the agent to act,
+though only by executing a plan that was already proposed to you, and only while its review is open.
 
 ## Who is trusted
 
@@ -26,11 +33,24 @@ annoying; reading a title discloses that text to the process asking. None of it 
 control directory, which is mode `0700` and owned by you. The runtime provides no peer-credential check on Unix sockets,
 so the extension cannot tell two same-user processes apart, and does not try.
 
+## Plan review: what is new in 0.2.0
+
+| Threat | Answer | Residual |
+|---|---|---|
+| A client approves the wrong plan (a review replaced between reading and answering) | `plan-answer` names the `reviewId` it read; the plugin and omp both refuse an id that is not the open review (`not_accepted`), and never retry. The plan text is pinned to the review's id, and each chunk repeats it | The review can still be replaced by one with the same plan text; that is the same plan |
+| A client acts on a session that was switched meanwhile | `plan-review` and `plan-answer` carry the live session id and generation like a change does | None beyond the above |
+| A late or out-of-order `plan_review_resolved` hides a newer review, or a closed review stays published | A resolve clears the review only when both ids match, and the plugin checks the host's `getPendingPlanReview` (the authority) after every event, answer and bind | The registry can be stale for the moment between a host change and the next event |
+| The plan text leaks | It leaves the process only to a client that entered the `0700` directory, only while a review is open, in frames of at most 64 KiB; nothing is written to `events.log` (not the plan, the title or the feedback). The registry holds only the id, a title cut to 200 characters and the opening time, so any process that can read the control directory sees the title | A dashboard that shows the plan must escape it and must not log it. Anything that forwards it to another machine owns that hop |
+| The answer is accepted but what follows fails (the write, compaction or the executed plan) | `accepted: true` means the terminal took the pick; the reply says nothing more | The user sees the outcome in the terminal |
+| In-terminal edits | The socket serves the plan as the review opened; an approval uses the edited text | A client cannot tell that the text differs; if you edit in the terminal, answer there |
+| An old omp | Without both host methods the plan operations are not offered and answer `unknown_op`; nothing else changes | None |
+| A huge plan or hostile review data | Strings from the host are validated, a plan is read in chunks that never exceed 64 KiB (the reply is measured), metadata too big for a frame is `too_large`, the review id (128), feedback (8000) and role (64) are bounded | A plan of many megabytes is held in memory as long as the review is open |
+
 ## Accepted risk: a process running as you
 
 Any program you run (an editor plugin, a build script, an npm package's install script, a compromised dependency) runs as
 you. It can already read your omp session files and credentials, send signals to omp (`kill`), and attach a debugger. It
-can use this socket too. That adds one more way to stop and rename sessions, and no capability it did not have. This is
+can use this socket too. That adds one more way to stop, rename and (with a plan review open) approve sessions, and no capability it did not have. This is
 the same trust model as an SSH agent socket or a Docker socket in your home: **if you do not trust the programs running
 under your account, do not enable it.**
 

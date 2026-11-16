@@ -15,7 +15,29 @@ export interface FakeContext {
 	abort(): void;
 	setTimeout(cb: () => void, ms: number): NodeJS.Timeout;
 	clearTimer(timer: NodeJS.Timeout): void;
+	getPendingPlanReview?(): PlanEvent | undefined;
+	resolvePlanReview?(reviewId: string, choice: string, input?: { feedback?: string; role?: string }): boolean;
 }
+
+/** omp's PlanReviewRequestedEvent. */
+export interface PlanEvent {
+	type: "plan_review_requested";
+	reviewId: string;
+	sessionId: string;
+	title: string;
+	planFilePath: string;
+	planContent: string;
+	options: Array<{ id: string; label: string; disabled: boolean }>;
+	tiers?: Array<{ role: string; provider: string; model: string; thinkingLevel?: string }>;
+}
+
+export const PLAN_OPTIONS = [
+	{ id: "execute", label: "Approve and execute", disabled: false },
+	{ id: "compact", label: "Approve and compact context", disabled: false },
+	{ id: "keep", label: "Approve and keep context (~10K / 200K)", disabled: false },
+	{ id: "refine", label: "Refine plan", disabled: false },
+	{ id: "save", label: "Save and quit", disabled: false },
+];
 
 export interface HostOptions {
 	mode?: FakeContext["mode"];
@@ -28,6 +50,8 @@ export interface HostOptions {
 	enable?: boolean;
 	/** Multiplies every ctx.setTimeout delay, so tests can exercise 10 s deadlines in a fraction of a second. */
 	timerScale?: number;
+	/** Give the context omp's plan-review methods (getPendingPlanReview, resolvePlanReview). Off by default, like an older omp. */
+	planReview?: boolean;
 }
 
 export class FakeHost {
@@ -47,6 +71,16 @@ export class FakeHost {
 	failSessionId = false;
 	/** What the injected getSessionId failure throws: an Error by default, anything for hostile-value tests. */
 	failValue: unknown = new Error("injected getSessionId failure");
+	/** The host's open plan review, as getPendingPlanReview reports it. */
+	pending: PlanEvent | undefined;
+	/** Every resolvePlanReview call that reached the host. */
+	resolveCalls: Array<{ reviewId: string; choice: string; input: unknown }> = [];
+	/** Make the host refuse every answer. */
+	refuseAnswers = false;
+	/** Keep the review pending after an accepted answer (a compaction runs behind the overlay). */
+	keepPendingAfterAnswer = false;
+	failGetPending = false;
+	private reviewCounter = 0;
 	readonly dir: string;
 	readonly root: string;
 	readonly ctx: FakeContext;
@@ -96,6 +130,27 @@ export class FakeHost {
 				this.timers.delete(t);
 			},
 		};
+		if (opts.planReview) {
+			this.ctx.getPendingPlanReview = () => {
+				if (this.failGetPending) throw new Error("injected getPendingPlanReview failure");
+				return this.pending ? structuredClone(this.pending) : undefined;
+			};
+			// The same refusals as omp's interactive-mode resolvePlanReview.
+			this.ctx.resolvePlanReview = (reviewId, choice, input) => {
+				this.resolveCalls.push({ reviewId, choice, input });
+				const p = this.pending;
+				if (this.refuseAnswers || !p || p.reviewId !== reviewId) return false;
+				const option = p.options.find(o => o.id === choice);
+				if (!option || option.disabled) return false;
+				if (choice === "refine" && !input?.feedback?.trim()) return false;
+				if (input?.role !== undefined) {
+					const approves = choice === "execute" || choice === "compact" || choice === "keep";
+					if (!approves || !p.tiers?.some(t => t.role === input.role)) return false;
+				}
+				if (!this.keepPendingAfterAnswer) this.pending = undefined;
+				return true;
+			};
+		}
 		this.pi = {
 			on: (event: string, handler: Handler) => {
 				this.handlers.set(event, [...(this.handlers.get(event) ?? []), handler]);
@@ -140,6 +195,33 @@ export class FakeHost {
 
 	async fire(event: string): Promise<void> {
 		for (const handler of this.handlers.get(event) ?? []) await handler({ type: event }, this.ctx);
+	}
+
+	/** Opens a review in the fake host and delivers plan_review_requested, as omp does (pending is set first). */
+	async openReview(over: Partial<PlanEvent> = {}, deliver = true): Promise<PlanEvent> {
+		this.reviewCounter += 1;
+		const event: PlanEvent = {
+			type: "plan_review_requested",
+			reviewId: `review-${this.reviewCounter}`,
+			sessionId: this.sessionId,
+			title: "Add a widget",
+			planFilePath: "local://PLAN.md",
+			planContent: "# Plan\n\n1. Do it\n",
+			options: structuredClone(PLAN_OPTIONS),
+			...over,
+		};
+		this.pending = event;
+		if (deliver) await this.emit("plan_review_requested", structuredClone(event));
+		return event;
+	}
+
+	/** Delivers plan_review_resolved for `event`; the host's own pending review is left alone. */
+	async resolveEvent(event: { reviewId: string; sessionId: string }, choice: string | undefined = undefined, by = "local"): Promise<void> {
+		await this.emit("plan_review_resolved", { type: "plan_review_resolved", reviewId: event.reviewId, sessionId: event.sessionId, choice, by });
+	}
+
+	async emit(event: string, payload: unknown): Promise<void> {
+		for (const handler of this.handlers.get(event) ?? []) await handler(payload, this.ctx);
 	}
 
 	async run(command: string, args = ""): Promise<string> {

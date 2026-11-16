@@ -24,11 +24,13 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 export const PLUGIN_NAME = "omp-session-control";
-export const PLUGIN_VERSION = "0.1.0";
+export const PLUGIN_VERSION = "0.2.0";
 /** Wire protocol versions this build speaks (docs/protocol/control-1.md). */
 export const PROTOCOL_VERSIONS: readonly number[] = [1];
 const PROTOCOL_VERSION = 1;
 export const OPS = ["snapshot", "abort", "rename"] as const;
+/** Offered only when the host has ctx.getPendingPlanReview and ctx.resolvePlanReview (feature-detected). */
+export const PLAN_OPS = ["plan-review", "plan-answer"] as const;
 
 const MAX_FRAME_BYTES = 64 * 1024;
 const MAX_CLIENTS = 4;
@@ -49,7 +51,15 @@ const MIN_IDLE_TIMEOUT_MS = 100;
 const MAX_IDLE_TIMEOUT_MS = 3_600_000;
 export const EXTENSION_ID = `extension-module:${path.basename(import.meta.path, path.extname(import.meta.path))}`;
 
-const MUTATING: Readonly<Record<string, boolean>> = { snapshot: false, abort: true, rename: true };
+const MUTATING: Readonly<Record<string, boolean>> = { snapshot: false, abort: true, rename: true, "plan-review": false, "plan-answer": true };
+/** Operations that must name the live session and generation (reads of the plan included: a switch between reads is refused). */
+const TARGET_CHECKED: Readonly<Record<string, true>> = { abort: true, rename: true, "plan-review": true, "plan-answer": true };
+const MAX_REVIEW_ID_CHARS = 128;
+const MAX_REGISTRY_TITLE_CHARS = 200;
+const MAX_FEEDBACK_CHARS = 8000;
+const MAX_ROLE_CHARS = 64;
+const NOT_ACCEPTED_MESSAGE =
+	"The terminal did not accept that answer: the review was closed or replaced, or that choice is unavailable.";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Settings: environment > omp plugin settings (`omp plugin config set omp-session-control <key> <value>`) > default.
@@ -363,6 +373,109 @@ async function optional<T>(load: () => Promise<T>): Promise<T | undefined> {
 const loadPluginLoader = () => import("@oh-my-pi/pi-coding-agent/extensibility/plugins/loader");
 const loadSettingsRegistry = () => import("@oh-my-pi/pi-coding-agent/config/registry");
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Plan review (pure helpers). The shapes mirror omp's PlanReviewRequestedEvent; everything from the host is validated
+// before it is kept, because it ends up in the registry and in replies.
+// ---------------------------------------------------------------------------------------------------------------------
+
+const PLAN_CHOICES = ["execute", "compact", "keep", "refine", "save"] as const;
+type PlanChoice = (typeof PLAN_CHOICES)[number];
+const APPROVALS: Readonly<Record<string, true>> = { execute: true, compact: true, keep: true };
+
+interface PlanOption {
+	id: PlanChoice;
+	label: string;
+	disabled: boolean;
+}
+interface PlanTier {
+	role: string;
+	provider: string;
+	model: string;
+	thinkingLevel?: string;
+}
+interface PlanReview {
+	reviewId: string;
+	sessionId: string;
+	title: string;
+	planFilePath: string;
+	planContent: string;
+	options: PlanOption[];
+	tiers: PlanTier[] | null;
+	/** When this plugin first saw the review (ISO-8601 UTC). */
+	openedAt: string;
+}
+
+/** The two host methods, looked up on the context at the time of use: an older omp lacks them. */
+interface PlanHost {
+	getPendingPlanReview(): unknown;
+	resolvePlanReview(reviewId: string, choice: string, input?: { feedback?: string; role?: string }): boolean;
+}
+
+function planHost(c: unknown): PlanHost | undefined {
+	const host = c as Partial<PlanHost> | null | undefined;
+	return host && typeof host.getPendingPlanReview === "function" && typeof host.resolvePlanReview === "function" ? (host as PlanHost) : undefined;
+}
+
+const isHigh = (unit: number): boolean => unit >= 0xd800 && unit <= 0xdbff;
+const isLow = (unit: number): boolean => unit >= 0xdc00 && unit <= 0xdfff;
+/** Length in code points, the unit the protocol's text limits use. */
+const codePoints = (text: string): number => {
+	let n = 0;
+	for (const _ of text) n += 1;
+	return n;
+};
+
+/** A review from the host, or undefined when it is not usable (wrong shape, an id the protocol cannot carry back). */
+function readReview(value: unknown): Omit<PlanReview, "openedAt"> | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const v = value as Record<string, unknown>;
+	if (typeof v.reviewId !== "string" || v.reviewId === "" || v.reviewId.length > MAX_REVIEW_ID_CHARS) return undefined;
+	if (typeof v.sessionId !== "string" || typeof v.planContent !== "string" || !Array.isArray(v.options) || v.options.length > 8) return undefined;
+	const options: PlanOption[] = [];
+	for (const o of v.options as unknown[]) {
+		if (!o || typeof o !== "object") return undefined;
+		const { id, label, disabled } = o as Record<string, unknown>;
+		if (!PLAN_CHOICES.includes(id as PlanChoice) || typeof label !== "string" || typeof disabled !== "boolean") return undefined;
+		options.push({ id: id as PlanChoice, label, disabled });
+	}
+	let tiers: PlanTier[] | null = null;
+	if (Array.isArray(v.tiers) && v.tiers.length <= 16) {
+		const list: PlanTier[] = [];
+		for (const t of v.tiers as unknown[]) {
+			const { role, provider, model, thinkingLevel } = (t ?? {}) as Record<string, unknown>;
+			if (typeof role !== "string" || typeof provider !== "string" || typeof model !== "string") {
+				list.length = 0;
+				break;
+			}
+			list.push({ role, provider, model, ...(typeof thinkingLevel === "string" ? { thinkingLevel } : {}) });
+		}
+		tiers = list.length > 0 ? list : null;
+	}
+	return {
+		reviewId: v.reviewId,
+		sessionId: v.sessionId,
+		title: typeof v.title === "string" ? v.title : "",
+		planFilePath: typeof v.planFilePath === "string" ? v.planFilePath : "",
+		planContent: v.planContent,
+		options,
+		tiers,
+	};
+}
+
+/** The longest prefix of `title`, in code points, for which `fits` holds; undefined when not even "" fits. */
+export function fitTitle(title: string, fits: (t: string) => boolean): string | undefined {
+	if (!fits("")) return undefined;
+	const points = Array.from(title).slice(0, MAX_REGISTRY_TITLE_CHARS);
+	let lo = 0;
+	let hi = points.length;
+	while (lo < hi) {
+		const mid = Math.ceil((lo + hi) / 2);
+		if (fits(points.slice(0, mid).join(""))) lo = mid;
+		else hi = mid - 1;
+	}
+	return points.slice(0, lo).join("");
+}
+
 export default async function ompSessionControl(pi: ExtensionAPI): Promise<void> {
 	// -- settings -----------------------------------------------------------------------------------------------------
 	const home = process.env.HOME || os.homedir();
@@ -471,6 +584,8 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	let dirIdentity = "";
 	let unsubscribeDisabled: (() => void) | undefined;
 	const clients = new Set<Client>();
+	/** The open plan review, as far as this plugin knows; the host's getPendingPlanReview is the authority (see reconcilePlan). */
+	let planReview: PlanReview | undefined;
 
 	const isMainTui = (c: ExtensionContext): boolean => c.mode === "tui" && c.agent.kind === "main";
 	const currentSessionId = (): string => ctx?.sessionManager.getSessionId() ?? "";
@@ -522,10 +637,11 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		}
 	};
 
-	const writeRegistry = (): void => {
-		if (!server || !listening || !registryPath || !ctx) return;
-		writeFileAtomic(
-			registryPath,
+	const opsFor = (c: ExtensionContext | undefined): readonly string[] => (planHost(c) ? [...OPS, ...PLAN_OPS] : OPS);
+
+	/** The registry text, at most MAX_REGISTRY_BYTES: a long plan title is cut to fit, never the other fields. */
+	const registryText = (c: ExtensionContext): string => {
+		const build = (plan: { reviewId: string; title: string; openedAt: string } | null): string =>
 			`${JSON.stringify({
 				v: PROTOCOL_VERSION,
 				versions: PROTOCOL_VERSIONS,
@@ -535,9 +651,62 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				sessionId: currentSessionId(),
 				generation,
 				plugin: { name: PLUGIN_NAME, version: PLUGIN_VERSION },
+				ops: opsFor(c),
+				planReview: plan,
 				writtenAt: new Date().toISOString(),
-			})}\n`,
-		);
+			})}\n`;
+		if (!planReview) return build(null);
+		const { reviewId, openedAt } = planReview;
+		const title = fitTitle(planReview.title, t => Buffer.byteLength(build({ reviewId, title: t, openedAt })) <= MAX_REGISTRY_BYTES);
+		if (title === undefined) {
+			logEvent("plan_registry_dropped");
+			return build(null);
+		}
+		return build({ reviewId, title, openedAt });
+	};
+
+	const writeRegistry = (): void => {
+		if (!server || !listening || !registryPath || !ctx) return;
+		writeFileAtomic(registryPath, registryText(ctx));
+	};
+
+	/** writeRegistry for callers that must not fail because of it (an answer that was already accepted). */
+	const publishRegistry = (): void => {
+		try {
+			writeRegistry();
+		} catch (error) {
+			logEvent("registry_publish_error", failure(error));
+		}
+	};
+
+	/**
+	 * Brings `planReview` in line with the host's getPendingPlanReview, which is the authority: a delayed resolve for a
+	 * review that was replaced, a compaction approval, a review that opened before this plugin was bound. A review
+	 * stays the same (content, openedAt) while its id does. Returns whether the review's id changed.
+	 */
+	const reconcilePlan = (c: ExtensionContext): boolean => {
+		const before = planReview?.reviewId;
+		const host = planHost(c);
+		if (!host) {
+			planReview = undefined;
+		} else {
+			let pending: unknown;
+			try {
+				pending = host.getPendingPlanReview();
+			} catch (error) {
+				logEvent("plan_reconcile_error", failure(error));
+				return false; // an unreadable host proves nothing: keep what is known
+			}
+			const review = pending === undefined || pending === null ? undefined : readReview(pending);
+			if (!review || review.sessionId !== currentSessionId()) planReview = undefined;
+			else if (planReview?.reviewId !== review.reviewId) planReview = { ...review, openedAt: new Date().toISOString() };
+		}
+		return planReview?.reviewId !== before;
+	};
+
+	/** reconcilePlan, then rewrites the registry when the review appeared, changed or went. */
+	const syncPlan = (c: ExtensionContext): void => {
+		if (reconcilePlan(c)) publishRegistry();
 	};
 
 	const clearIdle = (client: Client): void => {
@@ -650,7 +819,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		pid: process.pid,
 		protocol: PROTOCOL_VERSION,
 		protocols: PROTOCOL_VERSIONS,
-		ops: OPS,
+		ops: opsFor(c),
 		plugin: { name: PLUGIN_NAME, version: PLUGIN_VERSION },
 	});
 
@@ -678,9 +847,95 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				if (after !== name) throw new ControlError("not_renamed", "omp kept the previous name", { before, after });
 				return { before, name: after };
 			}
+			case "plan-review":
+				return readPlan(c, req);
+			case "plan-answer":
+				return answerPlan(c, req.args);
 			default:
 				throw new ControlError("unknown_op", `unknown op ${req.op}`);
 		}
+	};
+
+	/** One piece of the pinned plan text; see docs/protocol/control-1.md, `plan-review`. */
+	const readPlan = (c: ExtensionContext, req: Request): unknown => {
+		syncPlan(c);
+		const review = planReview;
+		if (!review) return { open: false };
+		const content = review.planContent;
+		const total = content.length; // UTF-16 code units
+		const offset = req.args.offset === undefined ? 0 : req.args.offset;
+		if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0 || offset > total) {
+			throw new ControlError("invalid_args", "offset must be an integer from 0 to the plan's length");
+		}
+		if (offset > 0 && offset < total && isHigh(content.charCodeAt(offset - 1)) && isLow(content.charCodeAt(offset))) {
+			throw new ControlError("invalid_args", "offset falls inside a character");
+		}
+		const result = (end: number) => ({
+			open: true,
+			reviewId: review.reviewId,
+			title: review.title,
+			planFilePath: review.planFilePath,
+			options: review.options,
+			tiers: review.tiers,
+			total,
+			offset,
+			nextOffset: end,
+			done: end === total,
+			chunk: content.slice(offset, end),
+		});
+		// The whole reply, envelope included, is serialized to measure it: JSON escaping makes a character cost 1 to 6 bytes.
+		const fits = (end: number): boolean => Buffer.byteLength(JSON.stringify({ v: PROTOCOL_VERSION, id: req.id, ok: true, result: result(end) })) <= MAX_FRAME_BYTES;
+		if (!fits(offset)) throw new ControlError("too_large", "the review's metadata does not fit in one frame");
+		let lo = offset;
+		let hi = Math.min(total, offset + MAX_FRAME_BYTES); // a unit costs at least one byte
+		while (lo < hi) {
+			const mid = Math.ceil((lo + hi) / 2);
+			if (fits(mid)) lo = mid;
+			else hi = mid - 1;
+		}
+		let end = lo;
+		if (end > offset && end < total && isHigh(content.charCodeAt(end - 1)) && isLow(content.charCodeAt(end))) end -= 1;
+		if (end === offset && offset < total) throw new ControlError("too_large", "the review's metadata leaves no room for text");
+		return result(end);
+	};
+
+	const answerPlan = (c: ExtensionContext, args: Record<string, unknown>): unknown => {
+		const host = planHost(c);
+		if (!host) throw new ControlError("unknown_op", "unknown op");
+		const { reviewId, choice, feedback, role } = args;
+		if (typeof reviewId !== "string" || reviewId === "" || reviewId.length > MAX_REVIEW_ID_CHARS) {
+			throw new ControlError("invalid_args", `reviewId must be a string of 1 to ${MAX_REVIEW_ID_CHARS} characters`);
+		}
+		if (typeof choice !== "string" || !PLAN_CHOICES.includes(choice as PlanChoice)) {
+			throw new ControlError("invalid_args", `choice must be one of ${PLAN_CHOICES.join(", ")}`);
+		}
+		if (feedback !== undefined && (typeof feedback !== "string" || codePoints(feedback) > MAX_FEEDBACK_CHARS)) {
+			throw new ControlError("invalid_args", `feedback must be a string of at most ${MAX_FEEDBACK_CHARS} characters`);
+		}
+		if (choice === "refine" && (typeof feedback !== "string" || feedback.trim() === "")) {
+			throw new ControlError("invalid_args", "refine needs non-blank feedback");
+		}
+		if (role !== undefined) {
+			if (typeof role !== "string" || role === "" || role.length > MAX_ROLE_CHARS) {
+				throw new ControlError("invalid_args", `role must be a string of 1 to ${MAX_ROLE_CHARS} characters`);
+			}
+			if (!Object.hasOwn(APPROVALS, choice)) throw new ControlError("invalid_args", "role applies only to execute, compact and keep");
+		}
+		syncPlan(c);
+		const review = planReview;
+		if (!review || review.reviewId !== reviewId) throw new ControlError("not_accepted", NOT_ACCEPTED_MESSAGE);
+		if (role !== undefined && !review.tiers?.some(t => t.role === role)) {
+			throw new ControlError("invalid_args", "role does not name a tier of this review");
+		}
+		const option = review.options.find(o => o.id === choice);
+		if (!option || option.disabled) throw new ControlError("not_accepted", NOT_ACCEPTED_MESSAGE);
+		const input: { feedback?: string; role?: string } = {};
+		if (choice === "refine") input.feedback = feedback as string;
+		if (role !== undefined) input.role = role as string;
+		const accepted = host.resolvePlanReview(reviewId, choice, input); // never retried
+		syncPlan(c);
+		if (accepted !== true) throw new ControlError("not_accepted", NOT_ACCEPTED_MESSAGE);
+		return { accepted: true };
 	};
 
 	/** Runs the operation, but not for longer than OP_TIMEOUT_MS: a hung omp call must not wedge control. */
@@ -736,6 +991,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			return;
 		}
 		if (typeof frame.op !== "string" || !Object.hasOwn(MUTATING, frame.op)) return fail("unknown_op", "unknown op");
+		if ((PLAN_OPS as readonly string[]).includes(frame.op) && ctx && !planHost(ctx)) return fail("unknown_op", "unknown op");
 		if (frame.args !== undefined && (typeof frame.args !== "object" || frame.args === null || Array.isArray(frame.args))) {
 			return fail("invalid_args", "args must be an object");
 		}
@@ -754,10 +1010,8 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				// A client that has gone, or a listener that was closed meanwhile, is owed no work: skip the mutation.
 				if (client.dead || epoch !== listenerEpoch) return;
 				if (off()) throw new ControlError("disabled", "session control is turned off");
-				if (MUTATING[req.op]) {
-					checkTarget(req); // re-checked when the mutation actually starts
-					if (hostMutationRunning) throw new ControlError("mutation_pending", "an earlier change has not finished in omp yet");
-				}
+				if (Object.hasOwn(TARGET_CHECKED, req.op)) checkTarget(req); // re-checked when the operation actually starts
+				if (MUTATING[req.op] && hostMutationRunning) throw new ControlError("mutation_pending", "an earlier change has not finished in omp yet");
 				reply(sock, { id, ok: true, result: await runWithDeadline(requireCtx(), req) });
 			} catch (error) {
 				// omp's own error text can hold file paths: clients get a fixed message, events.log gets the text.
@@ -1081,6 +1335,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		ctx = c;
 		selfDisabled = isSelfDisabled();
 		if (settings.warnings.length > 0 && !CONTROL_DIR) notifyOnce(settings.warnings[0] as string);
+		syncPlan(c); // a review that opened before this plugin was bound
 		reconcile(reason);
 		return true;
 	};
@@ -1093,6 +1348,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	);
 	// A switch (/new, /resume, /fork) and a branch both replace the session: the registry must follow.
 	const onSessionReplaced = (reason: string) => (_event: unknown, c: ExtensionContext) => {
+		planReview = undefined; // the old session's review is gone; bind reads the host again
 		if (!bind(c, reason)) return;
 		generation += 1;
 		writeRegistry();
@@ -1114,6 +1370,32 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			unsubscribeDisabled = undefined;
 		}),
 	);
+	// The review is tracked from the events and checked against the host after every one of them. Both handlers are
+	// synchronous: omp waits for handlers of plan_review_requested before it reports the resolve.
+	pi.on(
+		"plan_review_requested",
+		guarded("plan_review_requested", (event: unknown, c: ExtensionContext) => {
+			if (!ctx || !isMainTui(c) || !planHost(c)) return;
+			const review = readReview(event);
+			if (review && review.sessionId === currentSessionId() && planReview?.reviewId !== review.reviewId) {
+				planReview = { ...review, openedAt: new Date().toISOString() };
+				publishRegistry();
+			}
+			syncPlan(c);
+		}),
+	);
+	pi.on(
+		"plan_review_resolved",
+		guarded("plan_review_resolved", (event: unknown, c: ExtensionContext) => {
+			if (!ctx || !isMainTui(c) || !planHost(c)) return;
+			const e = (event ?? {}) as Record<string, unknown>;
+			if (planReview && e.reviewId === planReview.reviewId && e.sessionId === planReview.sessionId) {
+				planReview = undefined;
+				publishRegistry();
+			}
+			syncPlan(c); // a replacement review, or one the host still holds
+		}),
+	);
 
 	// -- /session-control ---------------------------------------------------------------------------------------------
 
@@ -1133,6 +1415,11 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				? `live disabling through disabledExtensions: unavailable (${liveDisableProblem}); the off file still works`
 				: "live disabling through disabledExtensions: available",
 		];
+		lines.push(
+			planHost(ctx)
+				? `plan review: answerable through ${PLAN_OPS.join(", ")}${planReview ? " (a review is open)" : ""}`
+				: "plan review: not available (this omp has no getPendingPlanReview and resolvePlanReview)",
+		);
 		for (const w of settings.warnings) lines.push(`warning: ${w}`);
 		return lines.join("\n");
 	};

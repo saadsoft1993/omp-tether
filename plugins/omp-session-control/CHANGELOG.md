@@ -3,6 +3,23 @@
 All notable changes to `omp-session-control`. The wire protocol has its own number (`session-control/1`) and changes
 only by spec; see `docs/protocol/control-1.md` in the repository.
 
+## 0.2.0 (2026-11-16)
+
+Plan review from a dashboard (needs an omp that has `ctx.getPendingPlanReview` and `ctx.resolvePlanReview`; 18.19.0 has them):
+
+- New operations `plan-review` (read the open review's metadata and the plan text in chunks, with a cursor counted in
+  UTF-16 code units) and `plan-answer` (pick `execute`, `compact`, `keep`, `refine` or `save`, with feedback for refine and
+  an optional execution tier). Both name the live session and generation. A new error code `not_accepted` means the
+  terminal refused the answer. Details: `docs/protocol/control-1.md`, section 6.
+- The registry gains `ops` (the operations the session answers; plan operations only when the host has both methods) and
+  `planReview` (`null`, or the open review's id, title and opening time). Older clients ignore both.
+- The plugin follows `plan_review_requested` and `plan_review_resolved` and checks them against the host's
+  `getPendingPlanReview` after every event, answer and bind, so a late resolve for a replaced review cannot hide the new one.
+- **What is now exposed changes.** While a review is open, a client of the socket can read the full plan text as
+  proposed and answer the review, which for an approval starts execution. See the updated threat model. Edits made inside
+  the terminal's review are not visible through the socket.
+- On an omp without the two methods nothing changes: the plan operations are not offered and answer `unknown_op`.
+
 ## 0.1.0 (2026-11-11)
 
 First release.

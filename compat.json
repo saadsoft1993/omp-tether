@@ -21,7 +21,7 @@
 	},
 	"plugins": {
 		"omp-session-control": {
-			"version": "0.1.0",
+			"version": "0.2.0",
 			"extensionId": "extension-module:omp-session-control",
 			"protocols": ["session-control/1"],
 			"platforms": ["darwin", "linux"],
@@ -30,7 +30,9 @@
 				"ExtensionAPI.registerCommand",
 				"ExtensionAPI.getSessionName, setSessionName",
 				"ExtensionContext.mode, agent.kind, sessionManager.getSessionId, isIdle, abort, ui.notify",
-				"ExtensionContext.setTimeout, clearTimer"
+				"ExtensionContext.setTimeout, clearTimer",
+				"ExtensionAPI.on: plan_review_requested, plan_review_resolved",
+				"ExtensionContext.getPendingPlanReview, resolvePlanReview (optional: plan-review and plan-answer are offered only when both exist)"
 			],
 			"ompInternals": [
 				{
