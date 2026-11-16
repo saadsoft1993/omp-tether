@@ -18,6 +18,14 @@ Session commands from a dashboard (each is offered only when the host omp has th
   compaction does.
 - `set-mode` accepts what `ctx.sessionModes.set` accepts, except starting a loop (a loop needs a prompt and a limit):
   plan and vibe enter/exit, goal enter (with an objective)/pause/resume/drop, loop exit.
+- `compact` counts a success only when omp emitted `session_compact`: omp's `ctx.compact()` resolves even when the
+  compaction failed, was cancelled or had nothing to compact. Otherwise the reply is `failed` ("Compaction did not
+  complete (cancelled, failed, or nothing to compact).").
+- `snapshot` and `session-info` gain `compacting`: true while a compaction is unsettled in omp (ours, even after its
+  request timed out, or an auto-compaction). `busy` does not cover compaction.
+- While one of our changes is unsettled (a `set-model` waiting inside omp, a compaction, even after a `timeout`), the
+  plugin cancels a session replacement (`session_before_switch`, `session_before_branch`), so a change cannot land on
+  the replacement session.
 - A connection with a request that is still unanswered is no longer closed as idle (a compaction can take longer than
   the 60 s idle timeout).
 - `ops` in the registry and in `snapshot` lists the new operations after the plan operations, for the ones the host has.

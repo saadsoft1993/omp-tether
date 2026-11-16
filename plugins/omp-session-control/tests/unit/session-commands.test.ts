@@ -96,6 +96,7 @@ describe("capability detection", () => {
 		await boot({ session: { thinking: true } });
 		expect(await info()).toEqual({
 			model: null,
+			compacting: false,
 			thinkingLevel: "high",
 			thinkingLevels: [],
 			models: [],
@@ -153,6 +154,7 @@ describe("session-info", () => {
 		expect(r.ok).toBe(true);
 		expect(r.result).toEqual({
 			model: { provider: "anthropic", id: "claude-opus-5-5" },
+			compacting: false,
 			thinkingLevel: "high",
 			thinkingLevels: ["off", "minimal", "low", "medium", "high"],
 			models: [
@@ -280,6 +282,139 @@ describe("compact", () => {
 		host.releaseCompact?.();
 		expect(await slow).toMatchObject({ ok: true });
 		await host.waitFor(() => c.closed, "the idle close once nothing is pending", 3000);
+	});
+});
+
+describe("compact: positive evidence of completion", () => {
+	test("success needs the session_compact event, and the reply waits for it", async () => {
+		await boot();
+		expect(await call("compact")).toMatchObject({ ok: true, result: { ok: true } });
+		expect(host.compactionsDone).toBe(1);
+	});
+
+	test("an event that arrives a moment after ctx.compact resolved still counts", async () => {
+		await boot();
+		host.compactBehaviour = "late-event";
+		expect(await call("compact")).toMatchObject({ ok: true });
+	});
+
+	test("ctx.compact resolving with no event (failed, cancelled or nothing to compact in the real TUI) is failed", async () => {
+		await boot({ timerScale: 0.01 }); // the 2 s wait for the event becomes 20 ms
+		host.compactBehaviour = "swallowed";
+		const r = await call("compact");
+		expect(r).toMatchObject({
+			ok: false,
+			code: "failed",
+			message: "Compaction did not complete (cancelled, failed, or nothing to compact).",
+		});
+		expect(host.compactionsDone).toBe(0);
+		expect((await info()).compacting).toBe(false);
+	});
+
+	test("an event from an earlier compaction does not count for a later one", async () => {
+		await boot({ timerScale: 0.01 });
+		expect((await call("compact")).ok).toBe(true);
+		host.compactBehaviour = "swallowed";
+		expect((await call("compact")).code).toBe("failed");
+	});
+
+	test("a cancelled or failed compaction does not leave the host marked busy", async () => {
+		await boot({ timerScale: 0.01 });
+		host.compactBehaviour = "swallowed";
+		expect((await call("compact")).code).toBe("failed");
+		expect((await call("set-thinking", { level: "low" })).ok).toBe(true);
+	});
+});
+
+describe("snapshot and session-info say whether a compaction is unsettled", () => {
+	test("compacting is false at rest, true while ours runs, still true after its request timed out, false once omp settles", async () => {
+		await boot({ timerScale: 0.001, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } }); // our deadline is 180 ms
+		const snap = async () => (await c.request({ v: 1, id: `n${++seq}`, nonce, op: "snapshot" })).result as Record<string, any>;
+		expect((await snap()).compacting).toBe(false);
+		expect((await info()).compacting).toBe(false);
+		host.compactBehaviour = "hang";
+		const slow = c.request(frame("compact"));
+		const second = await other();
+		await host.waitFor(() => host.compactCalls.length > 0, "the compaction to start");
+		const during = (await second.request({ v: 1, id: "a", nonce, op: "snapshot" })).result as Record<string, any>;
+		expect(during.compacting).toBe(true);
+		expect(((await second.request(frame("session-info"))).result as any).compacting).toBe(true);
+		expect((await slow).code).toBe("timeout");
+		// after the request timed out the compaction is still unsettled in omp
+		expect(((await second.request({ v: 1, id: "b", nonce, op: "snapshot" })).result as any).compacting).toBe(true);
+		expect(((await second.request(frame("session-info"))).result as any).compacting).toBe(true);
+		host.releaseCompact?.();
+		await host.waitFor(async () => false, "settle", 10).catch(() => {});
+		await new Promise(r => setTimeout(r, 80));
+		expect(((await second.request({ v: 1, id: "c", nonce, op: "snapshot" })).result as any).compacting).toBe(false);
+		expect(((await second.request(frame("session-info"))).result as any).compacting).toBe(false);
+		second.close();
+	});
+
+	test("an auto-compaction started by omp shows too", async () => {
+		await boot();
+		await host.emit("auto_compaction_start", { type: "auto_compaction_start" });
+		expect((await info()).compacting).toBe(true);
+		await host.emit("auto_compaction_end", { type: "auto_compaction_end" });
+		expect((await info()).compacting).toBe(false);
+	});
+});
+
+describe("a session replacement cannot land while one of our changes is unsettled", () => {
+	const gate = () => {
+		let open!: () => void;
+		const promise = new Promise<void>(resolve => (open = resolve));
+		return { promise, open };
+	};
+
+	test("a switch or branch requested while set-model waits inside omp is cancelled, and allowed again after", async () => {
+		await boot();
+		const g = gate();
+		host.setModelGate = g.promise;
+		const second = await other();
+		const pending = second.request(frame("set-model", { provider: "openai", id: "gpt-6.1-sol" }));
+		await host.waitFor(() => host.setModelCalls.length > 0, "set-model to reach omp");
+		for (const event of ["session_before_switch", "session_before_branch"]) {
+			expect(await host.cancelled(event, { reason: "new" })).toBe(true);
+		}
+		expect(host.notices.some(n => n.message.includes("still running"))).toBe(true);
+		g.open();
+		expect((await pending).ok).toBe(true);
+		for (const event of ["session_before_switch", "session_before_branch"]) {
+			expect(await host.cancelled(event, { reason: "new" })).toBe(false);
+		}
+		second.close();
+	});
+
+	test("the refusal also holds after our request has timed out, until omp settles", async () => {
+		await boot({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } });
+		const g = gate();
+		host.setModelGate = g.promise;
+		expect((await call("set-model", { provider: "openai", id: "gpt-6.1-sol" })).code).toBe("timeout");
+		expect(await host.cancelled("session_before_switch", { reason: "resume" })).toBe(true);
+		expect(await host.cancelled("session_before_branch", { reason: "fork" })).toBe(true);
+		g.open();
+		await new Promise(r => setTimeout(r, 50));
+		expect(await host.cancelled("session_before_switch", { reason: "resume" })).toBe(false);
+		// the model change landed on the session it was meant for
+		expect((await info()).model.id).toBe(MODEL_B.id);
+	});
+
+	test("a switch is not touched when nothing of ours is running, or when it is not the main interactive session", async () => {
+		await boot();
+		expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(false);
+		expect(await host.cancelled("session_before_branch", { reason: "branch" })).toBe(false);
+	});
+
+	test("a compaction of ours holds back a replacement too", async () => {
+		await boot({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } });
+		host.compactBehaviour = "hang";
+		const slow = c.request(frame("compact"));
+		await host.waitFor(() => host.compactCalls.length > 0, "the compaction to start");
+		expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(true);
+		host.releaseCompact?.();
+		await slow;
+		expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(false);
 	});
 });
 

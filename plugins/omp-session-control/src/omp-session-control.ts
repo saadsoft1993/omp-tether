@@ -55,6 +55,13 @@ const OP_TIMEOUT_MS = 10_000; // an operation omp does not finish by then gets a
  * with `mutation_pending` until omp settles it.
  */
 const COMPACT_TIMEOUT_MS = 180_000;
+/**
+ * omp's own `ctx.compact()` can resolve although the compaction failed, was cancelled or had nothing to compact (the
+ * interactive controller swallows the outcome), so the only proof is the `session_compact` event, which omp emits after
+ * the compaction entry is saved. It can be emitted a moment after compact() resolves; wait this long for it.
+ */
+const COMPACT_EVENT_GRACE_MS = 2_000;
+const COMPACT_NOT_DONE_MESSAGE = "Compaction did not complete (cancelled, failed, or nothing to compact).";
 const MAX_INSTRUCTIONS_CHARS = 2000;
 const MAX_OBJECTIVE_CHARS = 2000;
 const MAX_MODEL_FIELD_CHARS = 128;
@@ -643,12 +650,13 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	const userError = (error: unknown): string => (error instanceof ControlError ? error.message : errorKind(error));
 
 	/** Runs `fn` and logs instead of throwing: nothing in here may take the session down. */
-	const guarded = <A extends unknown[]>(label: string, fn: (...args: A) => void): ((...args: A) => void) => {
+	const guarded = <A extends unknown[], R = void>(label: string, fn: (...args: A) => R): ((...args: A) => R | undefined) => {
 		return (...args: A) => {
 			try {
-				fn(...args);
+				return fn(...args);
 			} catch (error) {
 				logEvent("handler_error", { label, ...failure(error) });
+				return undefined;
 			}
 		};
 	};
@@ -681,6 +689,12 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	let hostMutationRunning = false;
 	/** A compaction is in progress in omp (started by `compact`, not yet settled): other changes are refused at once, not queued behind it. */
 	let compactionRunning = false;
+	/** An omp-started compaction (auto-compaction) is in progress, from its start and end events. */
+	let autoCompacting = false;
+	/** `session_compact` events seen, and the waiters that want the next one. */
+	let compactionsSeen = 0;
+	const compactionWaiters = new Set<() => void>();
+	const isCompacting = (): boolean => compactionRunning || autoCompacting;
 	/** True once the socket is bound and the registry published; the registry is never written before. */
 	let listening = false;
 	/** Counts listener starts; requests accepted by an earlier listener never touch the current one's counters. */
@@ -928,6 +942,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		generation,
 		name: pi.getSessionName() ?? null,
 		busy: !c.isIdle(),
+		compacting: isCompacting(),
 		pid: process.pid,
 		protocol: PROTOCOL_VERSION,
 		protocols: PROTOCOL_VERSIONS,
@@ -1124,6 +1139,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			}
 			const build = () => ({
 				model: readModel(modelObject, false) ?? null,
+				compacting: isCompacting(),
 				thinkingLevel: currentThinking(),
 				thinkingLevels: thinkingLevelsOf(modelObject),
 				models,
@@ -1141,6 +1157,20 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		}
 	};
 
+	/** True once a `session_compact` event newer than `since` has been seen, waiting a short while for a late one. */
+	const compactionEventSince = (c: ExtensionContext, since: number): Promise<boolean> =>
+		new Promise<boolean>(resolve => {
+			if (compactionsSeen > since) return resolve(true);
+			let timer: Timer | undefined;
+			const done = (): void => {
+				if (timer !== undefined) c.clearTimer(timer);
+				compactionWaiters.delete(done);
+				resolve(compactionsSeen > since);
+			};
+			timer = c.setTimeout(done, COMPACT_EVENT_GRACE_MS);
+			compactionWaiters.add(done);
+		});
+
 	const compactSession = async (c: ExtensionContext, args: Record<string, unknown>): Promise<unknown> => {
 		requireSupport("compact", c);
 		const { instructions } = args;
@@ -1152,7 +1182,9 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		try {
 			// Resolves when the compaction has finished (or there was nothing to compact); rejects when it failed.
 			compactionRunning = true;
+			const seenBefore = compactionsSeen;
 			await (instructions === undefined || instructions.trim() === "" ? c.compact() : c.compact(instructions));
+			if (!(await compactionEventSince(c, seenBefore))) throw new ControlError("failed", COMPACT_NOT_DONE_MESSAGE);
 		} catch (error) {
 			throw hostFailed("compact", error);
 		} finally {
@@ -1644,6 +1676,25 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		generation += 1;
 		writeRegistry();
 	};
+	// A change we started (set-model awaits before it mutates, a compaction runs for a long time) must land on the session
+	// it was meant for: while one is unsettled, even after its request timed out, the terminal may not replace the session.
+	const refuseReplacement = (_event: unknown, c: ExtensionContext): { cancel: true } | undefined => {
+		if (!ctx || !isMainTui(c) || !(hostMutationRunning || compactionRunning)) return undefined;
+		logEvent("replacement_refused");
+		c.ui.notify("session-control: a change requested over the control socket is still running; try again in a moment", "warning");
+		return { cancel: true };
+	};
+	pi.on("session_before_switch", guarded("session_before_switch", refuseReplacement));
+	pi.on("session_before_branch", guarded("session_before_branch", refuseReplacement));
+	pi.on(
+		"session_compact",
+		guarded("session_compact", () => {
+			compactionsSeen += 1;
+			for (const waiter of [...compactionWaiters]) waiter();
+		}),
+	);
+	pi.on("auto_compaction_start", guarded("auto_compaction_start", () => void (autoCompacting = true)));
+	pi.on("auto_compaction_end", guarded("auto_compaction_end", () => void (autoCompacting = false)));
 	pi.on("session_switch", guarded("session_switch", onSessionReplaced("session_switch")));
 	pi.on("session_branch", guarded("session_branch", onSessionReplaced("session_branch")));
 	pi.on(

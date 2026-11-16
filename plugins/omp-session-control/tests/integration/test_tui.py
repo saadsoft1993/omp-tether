@@ -490,6 +490,8 @@ class SessionControlInRealOmp(unittest.TestCase):
             "the compaction must be in the session file by the time compact answered",
         )
         self.assertFalse(self.snapshot()["busy"])
+        self.assertIs(self.snapshot()["compacting"], False)
+        self.assertIs(self.op("session-info")["compacting"], False)
         self.assertTrue(self.omp.alive())
         # no argument text in the log
         self.assertNotIn("keep the probe details", (self.ctl_dir / "events.log").read_text())

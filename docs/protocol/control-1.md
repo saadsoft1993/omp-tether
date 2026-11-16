@@ -178,12 +178,12 @@ Anything else needs a new version.
 Read-only. `args` is ignored.
 
 ```json
-{"sessionId":"...","generation":0,"name":null,"busy":false,"pid":12345,
+{"sessionId":"...","generation":0,"name":null,"busy":false,"compacting":false,"pid":12345,
  "protocol":1,"protocols":[1],"ops":["snapshot","abort","rename","plan-review","plan-answer","session-info","compact","set-model","set-thinking","set-mode"],
  "plugin":{"name":"omp-session-control","version":"0.3.0"}}
 ```
 
-`busy` is true while a turn is running (streaming or running tools). `name` is the session's current title or `null`. `ops` is the capability list: a client MUST NOT send an operation that `ops` (or the registry `ops`) does not list: `plan-review` and `plan-answer` get `unknown_op`, the session commands of plugin 0.3.0 (`session-info`, `compact`, `set-model`, `set-thinking`, `set-mode`) get `unsupported`.
+`busy` is true while a turn is running (streaming or running tools). It does **not** cover a compaction. `compacting` (plugin 0.3.0; a client MUST treat a missing field as unknown) is true while a compaction is unsettled in omp: one started by `compact`, **including after that request answered `timeout`**, or one omp started itself (auto-compaction). It is the signal to poll after a `compact` timeout, and also in `session-info`. `name` is the session's current title or `null`. `ops` is the capability list: a client MUST NOT send an operation that `ops` (or the registry `ops`) does not list: `plan-review` and `plan-answer` get `unknown_op`, the session commands of plugin 0.3.0 (`session-info`, `compact`, `set-model`, `set-thinking`, `set-mode`) get `unsupported`.
 
 ### `abort`
 
@@ -272,14 +272,14 @@ Anything omp throws or refuses is `failed` with a fixed message (omp's own text 
 Read-only. `args` is ignored. Result:
 
 ```json
-{"model":{"provider":"anthropic","id":"claude-opus-5-5"},"thinkingLevel":"high",
+{"model":{"provider":"anthropic","id":"claude-opus-5-5"},"compacting":false,"thinkingLevel":"high",
  "thinkingLevels":["off","minimal","low","medium","high"],
  "models":[{"provider":"anthropic","id":"claude-opus-5-5","name":"Claude Opus 5.5"}],
  "mode":{"plan":false,"goal":false,"loop":false,"vibe":false},
  "modeStatus":{"plan":"inactive","vibe":"inactive","goal":"paused","loop":"inactive"}}
 ```
 
-`model` is `null` when no model is set. `thinkingLevel` is `null` when the host cannot say. `thinkingLevels` are the
+`compacting` is the same flag as in `snapshot`. `model` is `null` when no model is set. `thinkingLevel` is `null` when the host cannot say. `thinkingLevels` are the
 values `set-thinking` accepts for the **current** model: `off` plus the efforts the model supports, empty when it has no
 reasoning (omp's `auto` and `inherit` selectors are not offered). `models` are the models the session can switch to
 (omp's authenticated list), at most 200, with `provider` and `id` at most 128 units, `name` cut to 80, and entries
@@ -292,13 +292,18 @@ itself, `inactive`, `active` or `paused`, so a client can tell a paused goal fro
 Args: `instructions`, optional string of at most 2000 UTF-16 units (focus for the summary; blank means none). Result
 `{"ok": true}`.
 
-**`compact` returns when the compaction has finished**, not when it has started, so that a failure ("nothing to
-compact", a model error) is reported as `failed` instead of being lost, and so that a client that gets `{ok: true}`
-knows the context was replaced. A summary is a model call, so this operation has its own deadline of **180 s** (the
+**`compact` returns when the compaction has finished**, not when it has started, so that a client that gets `{ok: true}`
+knows the context was replaced. omp's `ctx.compact()` is not proof of that: in the interactive terminal it resolves even
+when the compaction failed, was cancelled or had nothing to compact. So the plugin counts a success only when omp
+emitted `session_compact` (after the compaction entry is saved) between the start and the end of the call, waiting up to
+2 s for one that comes just after the call returns. With no such event the reply is `failed`: "Compaction did not
+complete (cancelled, failed, or nothing to compact)." A summary is a model call, so this operation has its own deadline of **180 s** (the
 other operations: 10 s). If it passes the client gets `timeout`: that means *not finished yet*, not *failed*. The
-compaction keeps running; until it settles, changing operations are refused **at once** with `mutation_pending` (not queued behind it), and `snapshot` and
+compaction keeps running (`compacting` stays true); until it settles, changing operations are refused **at once** with `mutation_pending` (not queued behind it), and `snapshot` and
 `session-info` still answer. The connection is not closed as idle while the request is unanswered. A client that cannot
 wait that long SHOULD give up on its own side and poll `snapshot` (`busy`) and `session-info`.
+
+**A session replacement is held back while a change of ours is unsettled.** `set-model` waits inside omp before it changes the model, and a compaction runs for a long time; a `/new`, `/resume`, fork or branch in the terminal meanwhile would make the change land on the new session. The plugin therefore cancels (through `session_before_switch` and `session_before_branch`) any replacement, with a notice in the terminal, from the moment a changing operation starts until omp settles it, including after its request timed out. The terminal user can repeat the command a moment later.
 
 A manual compaction in omp aborts a turn in flight. This operation never does that as a side effect: when a turn is
 running it answers `failed` ("the agent is busy; stop the turn before compacting") and does nothing; a client that

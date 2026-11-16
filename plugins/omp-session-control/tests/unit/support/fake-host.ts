@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import ompSessionControl from "../../../src/omp-session-control";
 
-type Handler = (event: unknown, ctx: FakeContext) => void | Promise<void>;
+type Handler = (event: unknown, ctx: FakeContext) => unknown;
 
 export interface FakeContext {
 	mode: "tui" | "rpc" | "print" | "json";
@@ -122,9 +122,13 @@ export class FakeHost {
 	thinkingCalls: string[] = [];
 	modeCalls: Array<Record<string, unknown>> = [];
 	/** How the fake compaction ends: resolve, throw, or stay open until `releaseCompact` is called. */
-	compactBehaviour: "ok" | "throw" | "hang" = "ok";
+	compactBehaviour: "ok" | "throw" | "hang" | "swallowed" | "late-event" = "ok";
+	/** Compactions that really happened (a session_compact event was emitted for each). */
+	compactionsDone = 0;
 	releaseCompact: (() => void) | undefined;
 	setModelResult: boolean | "throw" | "ignore" = true;
+	/** While set, setModel waits for it before it changes anything (omp awaits before it mutates). */
+	setModelGate: Promise<void> | undefined;
 	setThinkingThrows = false;
 	modeResult: unknown = undefined;
 	modeThrows = false;
@@ -206,6 +210,15 @@ export class FakeHost {
 				this.compactCalls.push(instructions);
 				if (this.compactBehaviour === "throw") throw new Error("injected compact failure: /home/secret/path");
 				if (this.compactBehaviour === "hang") await new Promise<void>(resolve => (this.releaseCompact = resolve));
+				// omp's interactive controller swallows a failed or cancelled compaction: ctx.compact() resolves, and
+				// no session_compact event follows. "swallowed" is that; the others emit the event as omp does.
+				if (this.compactBehaviour === "swallowed") return;
+				const emitDone = async () => {
+					this.compactionsDone += 1;
+					await this.emit("session_compact", { type: "session_compact", compactionEntry: { type: "compaction" }, fromExtension: false });
+				};
+				if (this.compactBehaviour === "late-event") setTimeout(() => void emitDone(), 30);
+				else await emitDone();
 			};
 		}
 		if (apis.models) {
@@ -251,6 +264,7 @@ export class FakeHost {
 		if (apis.setModel) {
 			this.pi.setModel = async (model: FakeModel) => {
 				this.setModelCalls.push(model);
+				await this.setModelGate;
 				if (this.setModelResult === "throw") throw new Error("injected setModel failure: /home/secret/path");
 				if (this.setModelResult === true) this.currentModel = this.available.find(m => m.provider === model.provider && m.id === model.id);
 				return this.setModelResult === "ignore" ? true : this.setModelResult;
@@ -320,6 +334,16 @@ export class FakeHost {
 
 	async emit(event: string, payload: unknown): Promise<void> {
 		for (const handler of this.handlers.get(event) ?? []) await handler(payload, this.ctx);
+	}
+
+	/** Delivers a cancellable `session_before_*` event; true when a handler answered `{cancel: true}`. */
+	async cancelled(event: string, payload: Record<string, unknown> = {}): Promise<boolean> {
+		let cancel = false;
+		for (const handler of this.handlers.get(event) ?? []) {
+			const result = (await handler({ type: event, ...payload }, this.ctx)) as { cancel?: boolean } | undefined;
+			if (result?.cancel === true) cancel = true;
+		}
+		return cancel;
 	}
 
 	async run(command: string, args = ""): Promise<string> {
