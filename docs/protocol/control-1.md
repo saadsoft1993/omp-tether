@@ -286,7 +286,7 @@ reasoning (omp's `auto` and `inherit` selectors are not offered). `models` are t
 authenticated list, `ctx.models.list`), in this order: the **current model first** (always listed, even if omp's list lacks it),
 then the **role models** (default, smol, slow, vision, plan, commit, tiny, memory, task, advisor, as configured, resolved by omp and
 only those that are in the list), then the rest in omp's order. At most 200, so the first entries are the ones that matter, with `provider` and `id` at most 128 units, `name` cut to 80, and entries
-without a usable `provider` and `id` left out; the list is halved until the whole result is under 48 KiB. `mode` is a
+without a usable `provider` and `id` left out; the list is halved until it is under 44 KiB (the list alone, so the cut depends on the models only). `set-model` validates against exactly the list that was cut, so a model the cut dropped is `invalid_args`. `mode` is a
 boolean per built-in mode, true when its status is `active`; `modeStatus` (an added field, compatible) has the status
 itself, `inactive`, `active` or `paused`, so a client can tell a paused goal from a dropped one.
 

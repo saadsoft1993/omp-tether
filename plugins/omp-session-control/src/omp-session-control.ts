@@ -69,7 +69,7 @@ const MAX_MODEL_NAME_CHARS = 80;
 const MAX_MODELS = 200;
 /** omp's built-in chat model roles, in the order its picker lists them; a role nobody configured resolves to nothing. */
 const MODEL_ROLES = ["default", "smol", "slow", "vision", "plan", "commit", "tiny", "memory", "task", "advisor"] as const;
-const MAX_INFO_BYTES = 48 * 1024; // the session-info result stays well inside one frame
+const MAX_MODELS_BYTES = 44 * 1024; // the models list alone; the rest of the session-info result is a few hundred bytes, so it stays inside one frame
 const FRAME_DEADLINE_MS = 10_000; // a frame must be complete this long after its first byte
 const RECHECK_MS = 2_000; // while there is something to wait for, look at the files again this often (see reconcile)
 const CLOSE_GRACE_MS = 2_000; // a socket we have said goodbye to is destroyed after this, whatever the peer does
@@ -1170,6 +1170,17 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		for (const m of available) add(m);
 		return out;
 	};
+	/**
+	 * The final selectable models: offeredModels cut (by halving) until the list as advertised fits MAX_MODELS_BYTES. It
+	 * depends on the models only, so `session-info` advertises exactly this and `set-model` validates against exactly this.
+	 */
+	const selectableModels = (c: ExtensionContext): Array<{ raw: unknown; ref: ModelRef }> => {
+		const list = offeredModels(c);
+		while (list.length > 0 && Buffer.byteLength(JSON.stringify(list.map(o => o.ref))) > MAX_MODELS_BYTES) {
+			list.length = Math.floor(list.length / 2);
+		}
+		return list;
+	};
 	const currentThinking = (): string | null => {
 		const level = isFn(piApi.getThinkingLevel) ? piApi.getThinkingLevel?.() : undefined;
 		return typeof level === "string" ? level : null;
@@ -1193,22 +1204,15 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				modes[key] = status === "active";
 				modeStatus[key] = typeof status === "string" ? status : "inactive";
 			}
-			const models: ModelRef[] = offeredModels(c).map(o => o.ref);
-			const build = () => ({
+			return {
 				model: readModel(modelObject, false) ?? null,
 				compacting: isCompacting(),
 				thinkingLevel: currentThinking(),
 				thinkingLevels: thinkingLevelsOf(modelObject),
-				models,
+				models: selectableModels(c).map(o => o.ref),
 				mode: modes,
 				modeStatus,
-			});
-			let result = build();
-			while (models.length > 0 && Buffer.byteLength(JSON.stringify(result)) > MAX_INFO_BYTES) {
-				models.length = Math.floor(models.length / 2);
-				result = build();
-			}
-			return result;
+			};
 		} catch (error) {
 			throw hostFailed("session-info", error);
 		}
@@ -1262,7 +1266,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		const provider = modelArg(args.provider, "provider");
 		const id = modelArg(args.id, "id");
 		try {
-			const target = offeredModels(c).find(o => o.ref.provider === provider && o.ref.id === id)?.raw;
+			const target = selectableModels(c).find(o => o.ref.provider === provider && o.ref.id === id)?.raw;
 			if (!target) throw new ControlError("invalid_args", "that model is not available in this session");
 			if ((await piApi.setModel?.(target)) !== true) throw new ControlError("failed", "omp did not switch: no usable API key for that model");
 			const now = readModel(currentModel(c), false);

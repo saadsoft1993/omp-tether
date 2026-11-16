@@ -235,7 +235,19 @@ describe("session-info", () => {
 		const raw = await call("session-info");
 		expect(raw.ok).toBe(true);
 		expect(Buffer.byteLength(JSON.stringify(raw))).toBeLessThan(64 * 1024);
-		expect((raw.result as any).models.length).toBeGreaterThan(0);
+		const advertised = (raw.result as any).models as Array<{ provider: string; id: string }>;
+		expect(advertised.length).toBeGreaterThan(0);
+		expect(advertised.length).toBeLessThan(300);
+		// a model the byte cap trimmed was never advertised: it cannot be selected, and omp is not called
+		const trimmed = host.available[host.available.length - 1] as FakeModel;
+		expect(advertised.some(m => m.id === trimmed.id)).toBe(false);
+		const r = await call("set-model", { provider: trimmed.provider, id: trimmed.id });
+		expect(r.code).toBe("invalid_args");
+		expect(host.setModelCalls).toEqual([]);
+		// the last advertised one can
+		const last = advertised[advertised.length - 1] as { provider: string; id: string };
+		expect((await call("set-model", last)).ok).toBe(true);
+		expect(host.setModelCalls.length).toBe(1);
 	});
 
 	test("a host failure is a fixed failed reply", async () => {
