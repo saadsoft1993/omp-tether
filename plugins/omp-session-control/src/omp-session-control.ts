@@ -67,6 +67,8 @@ const MAX_OBJECTIVE_CHARS = 2000;
 const MAX_MODEL_FIELD_CHARS = 128;
 const MAX_MODEL_NAME_CHARS = 80;
 const MAX_MODELS = 200;
+/** omp's built-in chat model roles, in the order its picker lists them; a role nobody configured resolves to nothing. */
+const MODEL_ROLES = ["default", "smol", "slow", "vision", "plan", "commit", "tiny", "memory", "task", "advisor"] as const;
 const MAX_INFO_BYTES = 48 * 1024; // the session-info result stays well inside one frame
 const FRAME_DEADLINE_MS = 10_000; // a frame must be complete this long after its first byte
 const RECHECK_MS = 2_000; // while there is something to wait for, look at the files again this often (see reconcile)
@@ -1127,6 +1129,47 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		const list = isFn(query?.list) ? query?.list?.() : [];
 		return Array.isArray(list) ? list : [];
 	};
+	/**
+	 * The models a client may pick, the set the terminal's /model picker offers (omp's authenticated list, ctx.models.list)
+	 * in this order: the current model (always, even when the list lacks it), the role models that are in the list
+	 * (default, smol, slow ... as configured, resolved by omp), then the rest in omp's order. Capped at MAX_MODELS, so
+	 * the first entries are the ones that matter. `session-info` shows exactly this and `set-model` validates against it.
+	 */
+	const offeredModels = (c: ExtensionContext): Array<{ raw: unknown; ref: ModelRef }> => {
+		const out: Array<{ raw: unknown; ref: ModelRef }> = [];
+		const seen = new Set<string>();
+		const add = (raw: unknown): void => {
+			const ref = readModel(raw, true);
+			if (!ref || out.length >= MAX_MODELS) return;
+			const key = `${ref.provider}\u0000${ref.id}`;
+			if (seen.has(key)) return;
+			seen.add(key);
+			out.push({ raw, ref });
+		};
+		const available = availableModels(c);
+		const inList = new Map<string, unknown>();
+		for (const m of available) {
+			const ref = readModel(m, false);
+			if (ref) inList.set(`${ref.provider}\u0000${ref.id}`, m);
+		}
+		add(currentModel(c));
+		const query = (c as unknown as HostSurface).models as { resolve?: (spec: string) => unknown } | undefined;
+		if (isFn(query?.resolve)) {
+			for (const role of MODEL_ROLES) {
+				let resolved: unknown;
+				try {
+					resolved = query?.resolve?.(`@${role}`);
+				} catch {
+					continue;
+				}
+				const ref = readModel(resolved, false);
+				const known = ref ? inList.get(`${ref.provider}\u0000${ref.id}`) : undefined;
+				if (known !== undefined) add(known);
+			}
+		}
+		for (const m of available) add(m);
+		return out;
+	};
 	const currentThinking = (): string | null => {
 		const level = isFn(piApi.getThinkingLevel) ? piApi.getThinkingLevel?.() : undefined;
 		return typeof level === "string" ? level : null;
@@ -1150,12 +1193,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				modes[key] = status === "active";
 				modeStatus[key] = typeof status === "string" ? status : "inactive";
 			}
-			const models: ModelRef[] = [];
-			for (const m of availableModels(c)) {
-				const ref = readModel(m, true);
-				if (ref) models.push(ref);
-				if (models.length >= MAX_MODELS) break;
-			}
+			const models: ModelRef[] = offeredModels(c).map(o => o.ref);
 			const build = () => ({
 				model: readModel(modelObject, false) ?? null,
 				compacting: isCompacting(),
@@ -1224,10 +1262,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		const provider = modelArg(args.provider, "provider");
 		const id = modelArg(args.id, "id");
 		try {
-			const target = availableModels(c).find(m => {
-				const ref = readModel(m, false);
-				return ref?.provider === provider && ref.id === id;
-			});
+			const target = offeredModels(c).find(o => o.ref.provider === provider && o.ref.id === id)?.raw;
 			if (!target) throw new ControlError("invalid_args", "that model is not available in this session");
 			if ((await piApi.setModel?.(target)) !== true) throw new ControlError("failed", "omp did not switch: no usable API key for that model");
 			const now = readModel(currentModel(c), false);

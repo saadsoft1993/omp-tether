@@ -177,11 +177,56 @@ describe("session-info", () => {
 
 	test("unusable list entries are left out, names are cut, the list is capped", async () => {
 		await boot();
+		host.currentModel = undefined;
 		const many: FakeModel[] = Array.from({ length: 250 }, (_, i) => ({ provider: "p", id: `m${i}`, name: "n".repeat(500) }));
 		host.available = [{ provider: "", id: "x" }, { provider: "p" } as unknown as FakeModel, { provider: "p", id: "y".repeat(129) }, ...many];
 		const r = await info();
 		expect(r.models.length).toBe(200);
 		expect(r.models[0]).toEqual({ provider: "p", id: "m0", name: "n".repeat(80) });
+	});
+
+	test("the list is the current model, then the role models, then the rest, in omp's order", async () => {
+		await boot();
+		const a = { provider: "aws", id: "a1", name: "A1" };
+		const b = { provider: "aws", id: "b1", name: "B1" };
+		const slow = { provider: "anthropic", id: "slow-1", name: "Slow" };
+		const smol = { provider: "anthropic", id: "smol-1", name: "Smol" };
+		const current = { provider: "anthropic", id: "cur", name: "Current" };
+		host.available = [a, b, slow, smol, current];
+		host.currentModel = current;
+		host.roles = { slow, smol, default: current, plan: { provider: "gone", id: "not-available" } };
+		const r = await info();
+		expect(r.models.map((m: any) => m.id)).toEqual(["cur", "smol-1", "slow-1", "a1", "b1"]); // role order: default, smol, slow
+		expect(r.models.some((m: any) => m.id === "not-available")).toBe(false); // a role model without credentials is not offered
+	});
+
+	test("the current model is always listed, even when the available list lacks it; models past the cap come after it", async () => {
+		await boot();
+		host.available = Array.from({ length: 250 }, (_, i) => ({ provider: "aws", id: `m${String(i).padStart(3, "0")}` }));
+		host.currentModel = { provider: "anthropic", id: "claude-opus-5-5", name: "Opus", reasoning: true, thinking: { efforts: ["low"] } };
+		const r = await info();
+		expect(r.models.length).toBe(200);
+		expect(r.models[0]).toEqual({ provider: "anthropic", id: "claude-opus-5-5", name: "Opus" });
+		expect(r.model).toEqual({ provider: "anthropic", id: "claude-opus-5-5" });
+	});
+
+	test("a role model that is also the current model is listed once", async () => {
+		await boot();
+		host.roles = { default: MODEL_A, slow: MODEL_B };
+		const ids = (await info()).models.map((m: any) => m.id);
+		expect(ids).toEqual([MODEL_A.id, MODEL_B.id, MODEL_C.id]);
+	});
+
+	test("set-model validates against the same list: a role model works, one past the cap or without credentials does not", async () => {
+		await boot();
+		host.available = [...Array.from({ length: 250 }, (_, i) => ({ provider: "aws", id: `m${String(i).padStart(3, "0")}` })), MODEL_B];
+		host.currentModel = MODEL_A;
+		host.roles = { slow: MODEL_B };
+		const listed = (await info()).models.map((m: any) => m.id);
+		expect(listed.slice(0, 2)).toEqual([MODEL_A.id, MODEL_B.id]);
+		expect((await call("set-model", { provider: "openai", id: "gpt-6.1-sol" })).ok).toBe(true); // a role model, last in omp's own order
+		expect((await call("set-model", { provider: "aws", id: "m249" })).code).toBe("invalid_args"); // past the cap
+		expect((await call("set-model", { provider: "gone", id: "nope" })).code).toBe("invalid_args");
 	});
 
 	test("a result that would not fit is shortened", async () => {

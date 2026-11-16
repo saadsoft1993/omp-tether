@@ -19,7 +19,7 @@ export interface FakeContext {
 	resolvePlanReview?(reviewId: string, choice: string, input?: { feedback?: string; role?: string }): boolean;
 	compact?(instructions?: string): Promise<void>;
 	model?: FakeModel;
-	models?: { list(): FakeModel[]; current(): FakeModel | undefined };
+	models?: { list(): FakeModel[]; current(): FakeModel | undefined; resolve(spec: string): FakeModel | undefined };
 	sessionModes?: {
 		getState(): FakeModeState;
 		set(request: Record<string, unknown>): Promise<unknown>;
@@ -114,6 +114,8 @@ export class FakeHost {
 	/** State and injected behaviour of the fake session-command APIs. */
 	currentModel: FakeModel | undefined = MODEL_A;
 	available: FakeModel[] = [MODEL_A, MODEL_B, MODEL_C];
+	/** Configured model roles, as ctx.models.resolve("@role") answers them. */
+	roles: Record<string, FakeModel | undefined> = {};
 	thinking: string | undefined = "high";
 	thinkingCeiling: string | undefined;
 	modes: FakeModeState = { plan: { status: "inactive" }, vibe: { status: "inactive" }, goal: { status: "inactive" }, loop: { status: "inactive" } };
@@ -228,6 +230,7 @@ export class FakeHost {
 					return structuredClone(this.available);
 				},
 				current: () => this.currentModel,
+				resolve: spec => (spec.startsWith("@") ? structuredClone(this.roles[spec.slice(1)]) : undefined),
 			};
 			Object.defineProperty(this.ctx, "model", { get: () => this.currentModel, enumerable: true });
 		}

@@ -7,6 +7,8 @@ only by spec; see `docs/protocol/control-1.md` in the repository.
 
 Session commands from a dashboard (each is offered only when the host omp has the API behind it; omp 18.19.0 has them):
 
+- `session-info.models` is the list the terminal's `/model` picker offers, ordered: the current model first (always
+  included), then the role models, then the rest, capped at 200; `set-model` validates against that same list.
 - New operations `session-info` (current model, thinking level and the levels the model supports, the models the session
   can switch to, and the status of the plan, vibe, goal and loop modes), `compact`, `set-model`, `set-thinking` and
   `set-mode`. All five name the live session and generation; the changing ones are serialized with the other changing

@@ -282,8 +282,10 @@ Read-only. `args` is ignored. Result:
 
 `compacting` is the same flag as in `snapshot`. `model` is `null` when no model is set. `thinkingLevel` is `null` when the host cannot say. `thinkingLevels` are the
 values `set-thinking` accepts for the **current** model: `off` plus the efforts the model supports, empty when it has no
-reasoning (omp's `auto` and `inherit` selectors are not offered). `models` are the models the session can switch to
-(omp's authenticated list), at most 200, with `provider` and `id` at most 128 units, `name` cut to 80, and entries
+reasoning (omp's `auto` and `inherit` selectors are not offered). `models` are the models the session can switch to: the set the terminal's `/model` picker offers (omp's
+authenticated list, `ctx.models.list`), in this order: the **current model first** (always listed, even if omp's list lacks it),
+then the **role models** (default, smol, slow, vision, plan, commit, tiny, memory, task, advisor, as configured, resolved by omp and
+only those that are in the list), then the rest in omp's order. At most 200, so the first entries are the ones that matter, with `provider` and `id` at most 128 units, `name` cut to 80, and entries
 without a usable `provider` and `id` left out; the list is halved until the whole result is under 48 KiB. `mode` is a
 boolean per built-in mode, true when its status is `active`; `modeStatus` (an added field, compatible) has the status
 itself, `inactive`, `active` or `paused`, so a client can tell a paused goal from a dropped one.
@@ -316,7 +318,7 @@ wants it sends `abort` first.
 
 #### `set-model`
 
-Args: `provider` and `id`, strings of 1 to 128 UTF-16 units. The pair MUST be in `session-info.models`; otherwise
+Args: `provider` and `id`, strings of 1 to 128 UTF-16 units. The pair MUST be in `session-info.models` (the same ordered, capped set); otherwise
 `invalid_args` and nothing changes. Calls `pi.setModel`; omp returns false when it has no usable API key for that
 model, which is `failed`. Result `{"model": {"provider", "id"}}`, read back from the session. If omp reports success but
 the session's model is not the requested one, the reply is `failed` ("omp kept the previous model").
