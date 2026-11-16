@@ -264,6 +264,68 @@ describe("plan-review reads", () => {
 		expect(c.closed).toBe(false);
 	});
 
+	/** Size of the reply frame the plugin builds for `plan[offset, end)`, rebuilt here from the wire shape. */
+	const replySize = (id: string, review: { reviewId: string; planContent: string; planFilePath: string }, offset: number, end: number) =>
+		Buffer.byteLength(
+			JSON.stringify({
+				v: 1,
+				id,
+				ok: true,
+				result: {
+					open: true,
+					reviewId: review.reviewId,
+					title: "Add a widget",
+					planFilePath: review.planFilePath,
+					options: PLAN_OPTIONS,
+					tiers: null,
+					total: review.planContent.length,
+					offset,
+					nextOffset: end,
+					done: end === review.planContent.length,
+					chunk: review.planContent.slice(offset, end),
+				},
+			}),
+		);
+
+	/** A review whose reply for plan[0, end) is exactly `target` bytes (the file path is padding). */
+	const tightReview = async (planContent: string, end: number, target: number) => {
+		const probe = { reviewId: `review-tight-${++seq}`, planContent, planFilePath: "" };
+		const planFilePath = "p".repeat(target - replySize("tight", probe, 0, end));
+		await host.openReview({ planContent, planFilePath, reviewId: probe.reviewId });
+		return { ...probe, planFilePath };
+	};
+	const tightRead = async (offset: number) => c.request(frame("plan-review", { offset }, { id: "tight" }));
+
+	test("tight budget: a single emoji that fits exactly is returned whole", async () => {
+		for (const target of [65_536, 65_535]) {
+			await tightReview("😀", 2, target);
+			const r = await tightRead(0);
+			expect(r.ok).toBe(true);
+			expect(r.result).toMatchObject({ chunk: "😀", offset: 0, nextOffset: 2, done: true, total: 2 });
+			expect(Buffer.byteLength(JSON.stringify(r))).toBeLessThanOrEqual(65_536);
+		}
+	});
+
+	test("tight budget: BMP and astral text returns the longest prefix that fits", async () => {
+		const plan = "a😀b😀c😀d";
+		for (const prefix of [1, 3, 4, 6]) {
+			const review = await tightReview(plan, prefix, 65_536); // plan[0, prefix) fits exactly; one more unit does not
+			expect(replySize("tight", review, 0, prefix + 1)).toBeGreaterThan(65_536);
+			const r = await tightRead(0);
+			expect(r.ok).toBe(true); // progress is required, never too_large
+			const res = r.result as { chunk: string; nextOffset: number; done: boolean };
+			expect(res.chunk).toBe(plan.slice(0, prefix)); // the longest complete-character prefix that fits
+			expect(res.nextOffset).toBe(prefix);
+			expect(res.done).toBe(false);
+			expect(Buffer.byteLength(JSON.stringify(r))).toBeLessThanOrEqual(65_536);
+		}
+	});
+
+	test("tight budget: when the text does not fit even one character the answer is too_large", async () => {
+		await tightReview("😀", 0, 65_536); // metadata fills the frame; the pair needs 4 more bytes
+		expect((await tightRead(0)).code).toBe("too_large");
+	});
+
 	test("the read names the session and generation like a mutation does", async () => {
 		await host.openReview();
 		expect((await c.request(frame("plan-review", { offset: 0 }, { sessionId: undefined }))).code).toBe("stale_session");

@@ -886,17 +886,21 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		// The whole reply, envelope included, is serialized to measure it: JSON escaping makes a character cost 1 to 6 bytes.
 		const fits = (end: number): boolean => Buffer.byteLength(JSON.stringify({ v: PROTOCOL_VERSION, id: req.id, ok: true, result: result(end) })) <= MAX_FRAME_BYTES;
 		if (!fits(offset)) throw new ControlError("too_large", "the review's metadata does not fit in one frame");
-		let lo = offset;
-		let hi = Math.min(total, offset + MAX_FRAME_BYTES); // a unit costs at least one byte
+		// The terminal chunk is measured on its own (`done` is true there and the text is the longest), then the search
+		// runs over complete-character boundaries only: a lone surrogate is escaped to 6 bytes, so measuring a position
+		// inside a pair would wrongly reject text that fits.
+		if (fits(total)) return result(total);
+		const boundary = (end: number): number => (isHigh(content.charCodeAt(end - 1)) && isLow(content.charCodeAt(end)) ? end + 1 : end);
+		let lo = offset; // always a boundary that fits
+		let hi = Math.min(total - 1, offset + MAX_FRAME_BYTES); // a unit costs at least one byte
 		while (lo < hi) {
 			const mid = Math.ceil((lo + hi) / 2);
-			if (fits(mid)) lo = mid;
+			const end = boundary(mid); // > lo, and at most hi + 1
+			if (end < total && fits(end)) lo = end;
 			else hi = mid - 1;
 		}
-		let end = lo;
-		if (end > offset && end < total && isHigh(content.charCodeAt(end - 1)) && isLow(content.charCodeAt(end))) end -= 1;
-		if (end === offset && offset < total) throw new ControlError("too_large", "the review's metadata leaves no room for text");
-		return result(end);
+		if (lo === offset) throw new ControlError("too_large", "the review's metadata leaves no room for text");
+		return result(lo);
 	};
 
 	const answerPlan = (c: ExtensionContext, args: Record<string, unknown>): unknown => {
