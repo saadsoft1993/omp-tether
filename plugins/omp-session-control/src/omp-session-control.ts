@@ -889,10 +889,11 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		// The terminal chunk is measured on its own (`done` is true there and the text is the longest), then the search
 		// runs over complete-character boundaries only: a lone surrogate is escaped to 6 bytes, so measuring a position
 		// inside a pair would wrongly reject text that fits.
-		if (fits(total)) return result(total);
+		// (A remainder longer than a frame cannot fit, so it is never serialized: every candidate is at most one frame of text.)
+		if (total - offset <= MAX_FRAME_BYTES && fits(total)) return result(total);
 		const boundary = (end: number): number => (isHigh(content.charCodeAt(end - 1)) && isLow(content.charCodeAt(end)) ? end + 1 : end);
 		let lo = offset; // always a boundary that fits
-		let hi = Math.min(total - 1, offset + MAX_FRAME_BYTES); // a unit costs at least one byte
+		let hi = Math.min(total - 1, offset + MAX_FRAME_BYTES - 1); // a unit costs at least one byte, so a full frame of text cannot fit
 		while (lo < hi) {
 			const mid = Math.ceil((lo + hi) / 2);
 			const end = boundary(mid); // > lo, and at most hi + 1

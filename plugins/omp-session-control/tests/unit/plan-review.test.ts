@@ -326,6 +326,30 @@ describe("plan-review reads", () => {
 		expect((await tightRead(0)).code).toBe("too_large");
 	});
 
+	test("a multi-megabyte plan never has more than one frame of text serialized per request", async () => {
+		await host.openReview({ planContent: "x".repeat(3_000_000) });
+		const real = JSON.stringify;
+		let widest = 0;
+		let reads = 0;
+		JSON.stringify = ((value: unknown, ...rest: unknown[]) => {
+			const chunk = (value as { result?: { chunk?: unknown } } | null)?.result?.chunk;
+			if (typeof chunk === "string") widest = Math.max(widest, chunk.length);
+			return (real as (...a: unknown[]) => string)(value, ...rest);
+		}) as typeof JSON.stringify;
+		try {
+			for (const offset of [0, 1_234_567, 2_999_000]) {
+				const r = await c.request(frame("plan-review", { offset }));
+				expect(r.ok).toBe(true);
+				reads += 1;
+			}
+		} finally {
+			JSON.stringify = real;
+		}
+		expect(reads).toBe(3);
+		expect(widest).toBeGreaterThan(0);
+		expect(widest).toBeLessThanOrEqual(64 * 1024);
+	});
+
 	test("the read names the session and generation like a mutation does", async () => {
 		await host.openReview();
 		expect((await c.request(frame("plan-review", { offset: 0 }, { sessionId: undefined }))).code).toBe("stale_session");
