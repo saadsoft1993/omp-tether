@@ -152,6 +152,7 @@ timed out (reads keep working), including across an off and on cycle. A changing
 | `not_ready` | the session is not bound yet |
 | `internal` | omp failed while running the operation; the message is fixed, the cause is in `events.log` |
 | `timeout` | omp did not finish the operation within 10 s (`compact`: 180 s). It may still take effect later (a `compact` is then still running); until it settles, changing operations get `mutation_pending` |
+| `busy` | the session commands and the other changing operations: a session replacement that the plugin allowed may be committing; retry after a moment (at most 30 s) |
 | `mutation_pending` | an earlier changing operation has not finished in omp yet (see `timeout`); retry later |
 | `too_large` | a frame exceeded 65 536 bytes; the connection is closed after this reply. Also, for `plan-review` only: the review's metadata alone does not fit in one reply frame (the connection stays open) |
 | `too_many_clients` | the 4-client limit is reached; sent on a new connection, which is then closed |
@@ -304,6 +305,8 @@ compaction keeps running (`compacting` stays true); until it settles, changing o
 wait that long SHOULD give up on its own side and poll `snapshot` (`busy`) and `session-info`.
 
 **A session replacement is held back while a change of ours is unsettled.** `set-model` waits inside omp before it changes the model, and a compaction runs for a long time; a `/new`, `/resume`, fork or branch in the terminal meanwhile would make the change land on the new session. The plugin therefore cancels (through `session_before_switch` and `session_before_branch`) any replacement, with a notice in the terminal, from the moment a changing operation starts until omp settles it, including after its request timed out. The terminal user can repeat the command a moment later.
+
+The other direction is closed too. omp lets other hooks, the abort and a flush run between the `session_before_*` hooks and the commit, and a change admitted in that gap would land on the replacement. So when the plugin lets a replacement through, changing operations (all of them, `abort` and `rename` included) are refused at once with `busy` ("the session is being replaced; try again in a moment") until omp reports the commit (`session_switch`, `session_branch` or `session_shutdown`). omp tells an extension nothing when another hook cancels the replacement, so in that case the hold ends after 30 s. Reads still answer.
 
 A manual compaction in omp aborts a turn in flight. This operation never does that as a side effect: when a turn is
 running it answers `failed` ("the agent is busy; stop the turn before compacting") and does nothing; a client that

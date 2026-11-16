@@ -26,6 +26,10 @@ Session commands from a dashboard (each is offered only when the host omp has th
 - While one of our changes is unsettled (a `set-model` waiting inside omp, a compaction, even after a `timeout`), the
   plugin cancels a session replacement (`session_before_switch`, `session_before_branch`), so a change cannot land on
   the replacement session.
+- When the plugin lets a session replacement through, changing operations get `busy` until omp reports the commit
+  (`session_switch`, `session_branch`, `session_shutdown`), or for 30 s if another hook cancelled the replacement, so a
+  change admitted between the veto check and the commit cannot land on the new session. The veto does not depend on the
+  terminal notice succeeding.
 - A connection with a request that is still unanswered is no longer closed as idle (a compaction can take longer than
   the 60 s idle timeout).
 - `ops` in the registry and in `snapshot` lists the new operations after the plan operations, for the ones the host has.

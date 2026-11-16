@@ -61,6 +61,13 @@ const COMPACT_TIMEOUT_MS = 180_000;
  * the compaction entry is saved. It can be emitted a moment after compact() resolves; wait this long for it.
  */
 const COMPACT_EVENT_GRACE_MS = 2_000;
+/**
+ * omp gives an extension no way to ask whether a session replacement is under way, and a later hook can still cancel one
+ * that ours let through, after which no event fires. So once we allow a replacement, changes are refused until the
+ * replacement is seen to commit (session_switch, session_branch, session_shutdown) or, if it was cancelled elsewhere,
+ * until this expiry.
+ */
+const REPLACING_EXPIRY_MS = 30_000;
 const COMPACT_NOT_DONE_MESSAGE = "Compaction did not complete (cancelled, failed, or nothing to compact).";
 const MAX_INSTRUCTIONS_CHARS = 2000;
 const MAX_OBJECTIVE_CHARS = 2000;
@@ -689,6 +696,28 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	let hostMutationRunning = false;
 	/** A compaction is in progress in omp (started by `compact`, not yet settled): other changes are refused at once, not queued behind it. */
 	let compactionRunning = false;
+	/** A replacement of the session (switch, new, fork, branch) that we allowed may be committing; see REPLACING_EXPIRY_MS. */
+	let replacing = false;
+	let replacingTimer: Timer | undefined;
+	const clearReplacing = (): void => {
+		replacing = false;
+		if (replacingTimer !== undefined) {
+			try {
+				ctx?.clearTimer(replacingTimer);
+			} catch {}
+			replacingTimer = undefined;
+		}
+	};
+	const markReplacing = (c: ExtensionContext): void => {
+		clearReplacing();
+		replacing = true;
+		replacingTimer = c.setTimeout(() => {
+			replacingTimer = undefined;
+			replacing = false;
+			logEvent("replacing_expired");
+		}, REPLACING_EXPIRY_MS);
+	};
+	const REPLACING_MESSAGE = "the session is being replaced; try again in a moment";
 	/** An omp-started compaction (auto-compaction) is in progress, from its start and end events. */
 	let autoCompacting = false;
 	/** `session_compact` events seen, and the waiters that want the next one. */
@@ -1322,6 +1351,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			op: frame.op,
 			args: (frame.args as Record<string, unknown> | undefined) ?? {},
 		};
+		if (MUTATING[req.op] && replacing) return fail("busy", REPLACING_MESSAGE);
 		if (MUTATING[req.op] && compactionRunning) return fail("mutation_pending", "a compaction is still running in omp");
 		if (outstanding >= MAX_OUTSTANDING) return fail("overloaded", "too many requests in flight");
 		outstanding += 1;
@@ -1333,6 +1363,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				if (client.dead || epoch !== listenerEpoch) return;
 				if (off()) throw new ControlError("disabled", "session control is turned off");
 				if (Object.hasOwn(TARGET_CHECKED, req.op)) checkTarget(req); // re-checked when the operation actually starts
+				if (MUTATING[req.op] && replacing) throw new ControlError("busy", REPLACING_MESSAGE); // re-checked when it starts
 				if (MUTATING[req.op] && hostMutationRunning) throw new ControlError("mutation_pending", "an earlier change has not finished in omp yet");
 				reply(sock, { id, ok: true, result: await runWithDeadline(requireCtx(), req) });
 			} catch (error) {
@@ -1666,11 +1697,13 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	pi.on(
 		"session_start",
 		guarded("session_start", (_event: unknown, c: ExtensionContext) => {
+			clearReplacing();
 			bind(c, "session_start");
 		}),
 	);
 	// A switch (/new, /resume, /fork) and a branch both replace the session: the registry must follow.
 	const onSessionReplaced = (reason: string) => (_event: unknown, c: ExtensionContext) => {
+		clearReplacing(); // the replacement committed: changes are checked against the new generation again
 		planReview = undefined; // the old session's review is gone; bind reads the host again
 		if (!bind(c, reason)) return;
 		generation += 1;
@@ -1679,9 +1712,17 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	// A change we started (set-model awaits before it mutates, a compaction runs for a long time) must land on the session
 	// it was meant for: while one is unsettled, even after its request timed out, the terminal may not replace the session.
 	const refuseReplacement = (_event: unknown, c: ExtensionContext): { cancel: true } | undefined => {
-		if (!ctx || !isMainTui(c) || !(hostMutationRunning || compactionRunning)) return undefined;
+		if (!ctx || !isMainTui(c)) return undefined;
+		if (!(hostMutationRunning || compactionRunning)) {
+			// Allowed. Other hooks, the abort and the flush still run before omp commits, and a change admitted in that gap
+			// would land on the replacement: refuse changes from here until the commit event (or the expiry).
+			markReplacing(c);
+			return undefined;
+		}
 		logEvent("replacement_refused");
-		c.ui.notify("session-control: a change requested over the control socket is still running; try again in a moment", "warning");
+		try {
+			c.ui.notify("session-control: a change requested over the control socket is still running; try again in a moment", "warning");
+		} catch {} // the veto never depends on the notice
 		return { cancel: true };
 	};
 	pi.on("session_before_switch", guarded("session_before_switch", refuseReplacement));
@@ -1701,6 +1742,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		"session_shutdown",
 		guarded("session_shutdown", (_event: unknown, c: ExtensionContext) => {
 			if (!isMainTui(c)) return;
+			clearReplacing();
 			stopped = true;
 			unwatchDir();
 			unwatchParent();

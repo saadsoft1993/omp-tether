@@ -406,6 +406,87 @@ describe("a session replacement cannot land while one of our changes is unsettle
 		expect(await host.cancelled("session_before_branch", { reason: "branch" })).toBe(false);
 	});
 
+	test("the veto holds when the terminal notice throws", async () => {
+		await boot();
+		const g = gate();
+		host.setModelGate = g.promise;
+		const second = await other();
+		const pending = second.request(frame("set-model", { provider: "openai", id: "gpt-6.1-sol" }));
+		await host.waitFor(() => host.setModelCalls.length > 0, "set-model to reach omp");
+		host.ctx.ui.notify = () => {
+			throw new Error("injected notify failure");
+		};
+		expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(true);
+		expect(await host.cancelled("session_before_branch", { reason: "fork" })).toBe(true);
+		g.open();
+		await pending;
+		second.close();
+	});
+
+	test("a replacement that was allowed holds changes back until it commits: the reviewer's ordering", async () => {
+		await boot();
+		const oldSession = host.sessionId;
+		// 1. before_switch is allowed while nothing of ours runs
+		expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(false);
+		// 2. a set-model arrives while omp is still deferring the switch (hooks, abort, flush): it is refused, never started
+		const g = gate();
+		host.setModelGate = g.promise;
+		const refused = await call("set-model", { provider: "openai", id: "gpt-6.1-sol" });
+		expect(refused).toMatchObject({ ok: false, code: "busy" });
+		expect(host.setModelCalls).toEqual([]);
+		for (const [op, args] of [
+			["rename", { name: "x" }],
+			["compact", {}],
+			["set-thinking", { level: "low" }],
+			["set-mode", { mode: "plan", action: "enter" }],
+		] as const) {
+			expect((await call(op, args)).code).toBe("busy");
+		}
+		expect(host.name).toBeUndefined();
+		// reads still answer
+		expect((await call("session-info")).ok).toBe(true);
+		// 3. the switch commits: the session is replaced and the event fires
+		host.sessionId = "01a1b65b-3333-7000-8000-000000000003";
+		await host.fire("session_switch");
+		g.open();
+		// 4. nothing of the old request reached the new session, and a request for the old session is stale
+		expect(host.setModelCalls).toEqual([]);
+		expect((await c.request(frame("set-model", { provider: "openai", id: "gpt-6.1-sol" }))).code).toBe("stale_session");
+		expect(host.currentModel?.id).toBe(MODEL_A.id);
+		expect(oldSession).not.toBe(host.sessionId);
+		// changes for the new session work again
+		const reg = host.registry()?.data as Record<string, any>;
+		const r = await c.request(frame("set-thinking", { level: "low" }, { sessionId: reg.sessionId, generation: reg.generation }));
+		expect(r.ok).toBe(true);
+	});
+
+	test("a branch commit clears the hold too", async () => {
+		await boot();
+		expect(await host.cancelled("session_before_branch", { reason: "branch", entryId: "e" })).toBe(false);
+		expect((await call("set-thinking", { level: "low" })).code).toBe("busy");
+		await host.fire("session_branch");
+		const reg = host.registry()?.data as Record<string, any>;
+		expect((await c.request(frame("set-thinking", { level: "low" }, { sessionId: reg.sessionId, generation: reg.generation }))).ok).toBe(true);
+	});
+
+	test("a replacement that another hook cancelled holds changes back only until the expiry", async () => {
+		await boot({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } }); // 30 s becomes 300 ms
+		expect(await host.cancelled("session_before_switch", { reason: "resume" })).toBe(false);
+		expect((await call("set-thinking", { level: "low" })).code).toBe("busy");
+		await new Promise(r => setTimeout(r, 450));
+		expect((await call("set-thinking", { level: "low" })).ok).toBe(true);
+	});
+
+	test("a native change that timed out keeps its veto however long the replacement hold is", async () => {
+		await boot({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } });
+		const g = gate();
+		host.setModelGate = g.promise;
+		expect((await call("set-model", { provider: "openai", id: "gpt-6.1-sol" })).code).toBe("timeout");
+		await new Promise(r => setTimeout(r, 450));
+		expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(true);
+		g.open();
+	});
+
 	test("a compaction of ours holds back a replacement too", async () => {
 		await boot({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } });
 		host.compactBehaviour = "hang";
