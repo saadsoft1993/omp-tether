@@ -185,7 +185,7 @@ class SessionControlInRealOmp(unittest.TestCase):
         self.assertFalse((self.scratch.home / ".config").exists(), "installing must not create anything outside ~/.omp")
         self.omp.type("/session-control status")
         kit.wait_for(lambda: "inert" in self.omp.text(), timeout=20, what="the status text")
-        self.assertIn("omp-session-control 0.2.0", self.omp.text())
+        self.assertIn("omp-session-control 0.3.0", self.omp.text())
         self.assertFalse((self.scratch.home / ".config").exists(), "status must not create anything either")
 
     def test_01_on_command_enables_this_session(self) -> None:
@@ -324,7 +324,21 @@ class SessionControlInRealOmp(unittest.TestCase):
     def test_70_a_plan_review_is_read_and_answered_over_the_socket(self) -> None:
         reg = self.reg()
         assert reg
-        self.assertEqual(reg["ops"], ["snapshot", "abort", "rename", "plan-review", "plan-answer"])
+        self.assertEqual(
+            reg["ops"],
+            [
+                "snapshot",
+                "abort",
+                "rename",
+                "plan-review",
+                "plan-answer",
+                "session-info",
+                "compact",
+                "set-model",
+                "set-thinking",
+                "set-mode",
+            ],
+        )
         self.assertIsNone(reg["planReview"])
         self.assertEqual(self.op("plan-review", {"offset": 0}), {"open": False})
         self.omp.type("/plan")
@@ -393,6 +407,92 @@ class SessionControlInRealOmp(unittest.TestCase):
         )
         self.assertTrue(self.omp.alive())
         self.assertNotIn("PROBE-FEEDBACK", (self.ctl_dir / "events.log").read_text())
+
+    def live_entries(self) -> list[dict]:
+        """The entries of the live session's file (after test_70 the scratch home holds several session files)."""
+        sid = self.snapshot()["sessionId"]
+        files = [f for f in (self.scratch.home / ".omp" / "agent" / "sessions").rglob("*.jsonl") if sid in f.name]
+        if len(files) != 1:
+            return []
+        return [json.loads(line) for line in files[0].read_text().splitlines() if line.strip()]
+
+    def test_75_session_commands_read_and_change_the_session(self) -> None:
+        self.assertTrue(kit.wait_for(lambda: self.snapshot()["busy"] is False, timeout=30, what="an idle session"))
+        # (the new session's registry follows a moment after the switch, so wait until it has been stable for a while)
+        stable: list = []
+
+        def settled() -> bool:
+            reg, snap = self.reg() or {}, self.snapshot()
+            now = (reg.get("sessionId"), reg.get("generation"))
+            if now != (snap["sessionId"], snap["generation"]) or snap["busy"]:
+                stable.clear()
+                return False
+            stable.append(time.monotonic())
+            return stable[-1] - stable[0] >= 3
+
+        kit.wait_for(settled, timeout=60, what="the registry to settle on the live session")
+        info = self.op("session-info")
+        self.assertEqual(info["model"], {"provider": "tethertest", "id": "lite"})
+        self.assertEqual(info["thinkingLevels"], [])  # the first fake model has no reasoning
+        self.assertEqual(
+            sorted((m["provider"], m["id"]) for m in info["models"]), [("tethertest", "deep"), ("tethertest", "lite")]
+        )
+        # start from off, whatever plan mode state the earlier test left
+        self.assertIn(self.op("set-mode", {"mode": "plan", "action": "exit"})["changed"], (True, False))
+        self.assertEqual(self.op("session-info")["mode"], {"plan": False, "goal": False, "loop": False, "vibe": False})
+        self.assertEqual(self.raw_op("set-thinking", {"level": "high"})["code"], "invalid_args")
+
+        # switch to the model that has a thinking ladder; the footer of the terminal shows it
+        self.assertEqual(
+            self.op("set-model", {"provider": "tethertest", "id": "deep"}),
+            {"model": {"provider": "tethertest", "id": "deep"}},
+        )
+        info = self.op("session-info")
+        self.assertEqual(info["model"]["id"], "deep")
+        self.assertEqual(info["thinkingLevels"], ["off", "low", "medium", "high"])
+        self.assertEqual(self.raw_op("set-model", {"provider": "tethertest", "id": "nope"})["code"], "invalid_args")
+        self.assertEqual(self.raw_op("set-thinking", {"level": "auto"})["code"], "invalid_args")
+        self.assertEqual(self.op("set-thinking", {"level": "medium"}), {"thinkingLevel": "medium"})
+        self.assertEqual(self.op("session-info")["thinkingLevel"], "medium")
+        self.assertEqual(self.op("set-thinking", {"level": "off"}), {"thinkingLevel": "off"})
+        kit.wait_for(
+            lambda: any(
+                e.get("type") == "thinking_level_change" and e.get("thinkingLevel") == "medium"
+                for e in self.live_entries()
+            ),
+            timeout=20,
+            what="the thinking level change in the session file",
+        )
+        self.assertEqual(self.op("set-model", {"provider": "tethertest", "id": "lite"})["model"]["id"], "lite")
+
+        # plan mode on and off; the registry and the terminal agree
+        self.assertEqual(self.op("set-mode", {"mode": "plan", "action": "enter"}), {"changed": True})
+        self.assertTrue(self.op("session-info")["mode"]["plan"])
+        self.assertEqual(self.op("set-mode", {"mode": "plan", "action": "enter"}), {"changed": False})
+        self.assertEqual(self.op("set-mode", {"mode": "plan", "action": "exit"}), {"changed": True})
+        self.assertFalse(self.op("session-info")["mode"]["plan"])
+        for args in (
+            {"mode": "loop", "action": "enter"},
+            {"mode": "plan", "action": "pause"},
+            {"mode": "goal", "action": "enter"},
+        ):
+            self.assertEqual(self.raw_op("set-mode", args)["code"], "invalid_args", args)
+
+        # compaction returns when it has finished: the session file then holds a compaction entry
+        self.assertEqual(self.raw_op("compact", {"instructions": "x" * 2001})["code"], "invalid_args")
+        started = time.monotonic()
+        reply = self.raw_op("compact", {"instructions": "keep the probe details"})
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(reply["result"], {"ok": True})
+        self.assertLess(time.monotonic() - started, 120)
+        self.assertTrue(
+            any(e.get("type") == "compaction" for e in self.live_entries()),
+            "the compaction must be in the session file by the time compact answered",
+        )
+        self.assertFalse(self.snapshot()["busy"])
+        self.assertTrue(self.omp.alive())
+        # no argument text in the log
+        self.assertNotIn("keep the probe details", (self.ctl_dir / "events.log").read_text())
 
     def test_90_exit_closes_the_socket_and_removes_the_registry(self) -> None:
         reg = self.reg()

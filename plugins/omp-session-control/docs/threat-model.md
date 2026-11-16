@@ -11,7 +11,8 @@ are the author's judgement. Read the source, it is one file.
 An extension that runs **inside** every interactive omp session, with no sandbox (omp extensions have none). When you
 enable it, the session listens on a Unix socket and answers up to five requests: `snapshot` (session id, generation, name,
 busy flag, process id, offered operations), `abort` (stop the running turn), `rename`, and, from 0.2.0 on an omp that has
-the plan-review methods, `plan-review` (read the open plan review) and `plan-answer` (answer it).
+the plan-review methods, `plan-review` (read the open plan review) and `plan-answer` (answer it). From 0.3.0, on an omp that has
+the APIs, also `session-info`, `compact`, `set-model`, `set-thinking` and `set-mode`.
 
 What control over the socket gives: stopping the turn a session is running, changing its title, reading the title (omp may
 derive it from your first message, so it can contain text you typed), and, **while an interactive plan review is open**,
@@ -32,6 +33,23 @@ though only by executing a plan that was already proposed to you, and only while
 **The user that runs omp, and root.** Nobody else. Access is decided by one thing: whether a process can enter the
 control directory, which is mode `0700` and owned by you. The runtime provides no peer-credential check on Unix sockets,
 so the extension cannot tell two same-user processes apart, and does not try.
+
+## Session commands: what is new in 0.3.0
+
+A socket client can now also read the session's model, thinking level, the models it can switch to and the plan, vibe,
+goal and loop states, and change them: switch the model, set the thinking level, start a compaction and enter or leave
+plan, vibe and goal modes (and leave loop mode). None of it submits a prompt, runs a command or touches files, but it
+changes what later turns cost and do.
+
+| Threat | Answer | Residual |
+|---|---|---|
+| A client switches to a model whose provider account you did not mean to spend | `set-model` accepts only a model in the session's own available list, and omp refuses one without a usable API key | A same-user process can run up usage on any model the session may use |
+| A compaction aborts your running turn or loses context | `compact` refuses while a turn is running (omp's own manual compaction would abort it). A compaction rewrites the context as it does when you run `/compact` | A client can still compact an idle session; the summary replaces earlier context |
+| A stuck or long compaction wedges control | It has its own 180 s deadline; after it, the client gets `timeout`, and other changes are refused at once with `mutation_pending` until omp settles it, so changes never overlap. Reads keep answering | Control cannot change the session until the compaction ends |
+| Entering a goal sends text to the model | `objective` is bounded to 2000 UTF-16 units, is never written to `events.log`, and no transition submits a prompt. A loop cannot be started remotely | A goal objective drives later turns, as when typed in the terminal |
+| Acting on a switched session | All five operations carry the live session id and generation, reads included | None beyond the above |
+| omp's error text leaks a path or a secret | Clients get fixed messages (`failed`, `unsupported`); omp's text is not forwarded. `events.log` holds error categories only | None |
+| An old omp | Operations whose API is missing are not in `ops` and answer `unsupported` | None |
 
 ## Plan review: what is new in 0.2.0
 

@@ -1,9 +1,9 @@
 # omp-session-control
 
 An [omp](https://github.com/can1357/oh-my-pi) extension that lets a program on your own machine **stop the running turn**
-of an interactive omp session, **rename** it and **answer its plan review**, over a private Unix socket. It is the session-side half of a local
+of an interactive omp session, **rename** it, **answer its plan review** and **run session commands** (compact, switch the model or the thinking level, change plan, goal and loop modes), over a private Unix socket. It is the session-side half of a local
 dashboard: the dashboard lists your sessions and gets a Stop and a Rename button; this extension does the stopping and
-renaming inside the session, and, from 0.2.0, shows a pending plan review and answers it.
+renaming inside the session, from 0.2.0 shows a pending plan review and answers it, and from 0.3.0 reads and changes the model, thinking level and modes and compacts the context. Each of those commands needs its omp API (`ctx.compact`, `pi.setModel`, `pi.setThinkingLevel`, `ctx.sessionModes`, all in 18.19.0) and is offered only when it exists; `compact` answers when the compaction has finished (up to 180 s) and never aborts a running turn.
 
 - **Inert until you turn it on.** Installing it changes nothing. It creates no files and opens no socket until you
   enable it (below). It registers one slash command, `/session-control`, and, when the control directory already exists,

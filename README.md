@@ -6,7 +6,7 @@ catalog; none of them does anything until you turn it on.
 
 | Plugin | What it does | Status |
 |---|---|---|
-| [`omp-session-control`](plugins/omp-session-control) | An extension that lets a local program stop the running turn of an interactive session, rename it and answer its plan review, over a private Unix socket | 0.2.0 (beta) |
+| [`omp-session-control`](plugins/omp-session-control) | An extension that lets a local program stop the running turn of an interactive session, rename it and answer its plan review, over a private Unix socket | 0.3.0 (beta) |
 | [`omp-services`](plugins/omp-services) | Sets up the background services other plugins need (launchd and `systemd --user` units), checks them (`doctor`), and runs a heartbeat that pings a URL of your choosing with the result of the health checks plugins contribute | 0.1.0 (beta) |
 | [`omp-private-relay`](plugins/omp-private-relay) | A Collab relay that runs on your own machine, a patched browser client for it, and per-browser pairing, so session links never go through omp's public relay | 0.1.2 (beta) |
 | [`omp-dashboard`](plugins/omp-dashboard) | A local dashboard for your own sessions: list, open (through your private relay), stop, rename, kill and start them, with per-browser pairing; its own hub (Python, standard library only) and page | 0.1.0 (beta) |

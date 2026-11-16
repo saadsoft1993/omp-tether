@@ -41,7 +41,7 @@ describe("operations", () => {
 				protocol: 1,
 				protocols: [1],
 				ops: ["snapshot", "abort", "rename"],
-				plugin: { name: "omp-session-control", version: "0.2.0" },
+				plugin: { name: "omp-session-control", version: "0.3.0" },
 			},
 		});
 	});

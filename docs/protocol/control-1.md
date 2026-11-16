@@ -15,7 +15,7 @@ Words in capitals (MUST, SHOULD, MAY) have their usual RFC 2119 meaning.
 - Nothing here is reachable over a network. A client that wants to reach a session from another machine has to
   carry the requests itself, and then owns the security of that hop.
 - The protocol is **not** a way to read a conversation. Always exposed: the session id, a generation counter, the name,
-  whether a turn is running, and the process id. Since protocol 1 revision 2 (plugin 0.2.0), while an interactive **plan
+  whether a turn is running, and the process id. Since protocol 1 revision 3 (plugin 0.3.0), a client can also read the session's model, thinking level and mode and the models it may switch to, change them, and start a context compaction (section 6). Since protocol 1 revision 2 (plugin 0.2.0), while an interactive **plan
   review** is open, it also exposes that review: its title, the path of the plan file, its choices and execution tiers,
   and the **full text of the plan as proposed** (through `plan-review`; the registry carries only the review's id, a
   title cut to 200 characters and the time it opened). A client of the plan operations can also answer the review,
@@ -72,8 +72,8 @@ them, close the listener, unlink the socket and the registry entry.
   "socket": "/home/u/.config/omp-session-control/0123456789abcdef.sock",
   "sessionId": "01a1c0db-82df-745a-95c4-c1388130d934",
   "generation": 0,
-  "plugin": { "name": "omp-session-control", "version": "0.2.0" },
-  "ops": ["snapshot", "abort", "rename", "plan-review", "plan-answer"],
+  "plugin": { "name": "omp-session-control", "version": "0.3.0" },
+  "ops": ["snapshot", "abort", "rename", "plan-review", "plan-answer", "session-info", "compact", "set-model", "set-thinking", "set-mode"],
   "planReview": { "reviewId": "2f1b...", "title": "Add a widget", "openedAt": "2026-11-16T08:01:12.004Z" },
   "writtenAt": "2026-11-16T08:01:12.010Z"
 }
@@ -89,7 +89,7 @@ them, close the listener, unlink the socket and the registry entry.
 | `sessionId` | omp's id of the session as of `writtenAt` |
 | `generation` | starts at 0 and increases by 1 each time the session switches to another session (`/new`, `/resume`, `/fork`, a branch) in the same process. The registry is rewritten at every switch and every branch |
 | `plugin` | informational |
-| `ops` | the operations this session answers, the same list as `snapshot.ops`. `plan-review` and `plan-answer` are listed only when the host omp has both `getPendingPlanReview` and `resolvePlanReview` (see Capability below). A registry with no `ops` field (plugin 0.1.x) means `snapshot`, `abort` and `rename` only |
+| `ops` | the operations this session answers, the same list as `snapshot.ops`. `plan-review` and `plan-answer` are listed only when the host omp has both `getPendingPlanReview` and `resolvePlanReview`; each session command (section 6, plugin 0.3.0) is listed only when the host has the API behind it. A registry with no `ops` field (plugin 0.1.x) means `snapshot`, `abort` and `rename` only |
 | `planReview` | `null`, or `{reviewId, title, openedAt}` for the interactive plan review that is open now: `reviewId` is at most 128 UTF-16 units, `title` at most 200 UTF-16 code units (cut so that the whole file stays within 4096 bytes), `openedAt` is the ISO-8601 UTC time the plugin first saw the review. Present on every registry of a 0.2.0 plugin; a client MUST treat a missing field as `null`. The registry is rewritten when a review opens, changes or closes |
 
 A client MUST ignore fields it does not know. Entries whose `pid` no longer exists are left behind by crashed sessions;
@@ -142,6 +142,8 @@ timed out (reads keep working), including across an off and on cycle. A changing
 | `disabled` | control was turned off (the listener is closing) |
 | `unknown_op` | `op` is not one of the supported operations (inherited object names such as `constructor` are unknown too), including `plan-review` and `plan-answer` on a session whose omp lacks the plan-review methods |
 | `invalid_args` | `args` is not an object, or an argument is invalid (names: section 6) |
+| `unsupported` | the session commands only: the host omp lacks the API behind the operation (the operation is then not in `ops`) |
+| `failed` | the session commands only: omp threw or refused (for example no API key for the model, or a mode that is busy). The message is fixed and short; the cause is in `events.log` |
 | `not_accepted` | `plan-answer` only: the terminal did not accept the answer (see section 6) |
 | `stale_session` | `sessionId` is not the live session; `detail` has the live `sessionId` and `generation` |
 | `stale_generation` | `generation` is not the live one; `detail` as above |
@@ -149,14 +151,14 @@ timed out (reads keep working), including across an off and on cycle. A changing
 | `not_renamed` | omp accepted the call but kept the old name; `detail` has `before` and `after` |
 | `not_ready` | the session is not bound yet |
 | `internal` | omp failed while running the operation; the message is fixed, the cause is in `events.log` |
-| `timeout` | omp did not finish the operation within 10 s. It may still take effect later; until it settles, changing operations get `mutation_pending` |
+| `timeout` | omp did not finish the operation within 10 s (`compact`: 180 s). It may still take effect later (a `compact` is then still running); until it settles, changing operations get `mutation_pending` |
 | `mutation_pending` | an earlier changing operation has not finished in omp yet (see `timeout`); retry later |
 | `too_large` | a frame exceeded 65 536 bytes; the connection is closed after this reply. Also, for `plan-review` only: the review's metadata alone does not fit in one reply frame (the connection stays open) |
 | `too_many_clients` | the 4-client limit is reached; sent on a new connection, which is then closed |
 | `closing` | sent unsolicited (`id` null) just before the session closes the connection |
 
 The checks happen in this order: JSON, object, `v`, `id`, `nonce`, off switch, `op`, `args`, in-flight limit, then (for
-`abort`, `rename`, `plan-review` and `plan-answer`) `sessionId` and `generation`, then the operation's own argument checks.
+`abort`, `rename`, `plan-review`, `plan-answer` and every session command) `sessionId` and `generation`, then the operation's own argument checks.
 
 ## 5. Versions
 
@@ -177,11 +179,11 @@ Read-only. `args` is ignored.
 
 ```json
 {"sessionId":"...","generation":0,"name":null,"busy":false,"pid":12345,
- "protocol":1,"protocols":[1],"ops":["snapshot","abort","rename","plan-review","plan-answer"],
- "plugin":{"name":"omp-session-control","version":"0.2.0"}}
+ "protocol":1,"protocols":[1],"ops":["snapshot","abort","rename","plan-review","plan-answer","session-info","compact","set-model","set-thinking","set-mode"],
+ "plugin":{"name":"omp-session-control","version":"0.3.0"}}
 ```
 
-`busy` is true while a turn is running (streaming or running tools). `name` is the session's current title or `null`. `ops` is the capability list: a client MUST NOT send `plan-review` or `plan-answer` to a session whose `ops` (or registry `ops`) does not list them; one that does gets `unknown_op`.
+`busy` is true while a turn is running (streaming or running tools). `name` is the session's current title or `null`. `ops` is the capability list: a client MUST NOT send an operation that `ops` (or the registry `ops`) does not list: `plan-review` and `plan-answer` get `unknown_op`, the session commands of plugin 0.3.0 (`session-info`, `compact`, `set-model`, `set-thinking`, `set-mode`) get `unsupported`.
 
 ### `abort`
 
@@ -245,6 +247,94 @@ the terminal took the pick, not that what follows worked**: writing, compaction 
 still fail. An approval starts executing the plan in that session; `save` writes the plan to its default file, leaves
 plan mode and clears into a new session (the omp process keeps running).
 
+### Session commands (plugin 0.3.0)
+
+Five operations that give a dashboard what `/compact`, `/model`, the thinking-level key and the plan, goal and loop
+commands give the terminal. They are not slash-command dispatch: each calls one typed omp extension API, and each is
+**offered only when the host has it** (`ops` says which; a client MUST NOT send the others, and one that does gets
+`unsupported`):
+
+| Operation | Offered when the host has |
+|---|---|
+| `session-info` | `ctx.models.list`, `ctx.sessionModes.getState` or `pi.getThinkingLevel` (any of them) |
+| `compact` | `ctx.compact` |
+| `set-model` | `pi.setModel` and `ctx.models.list` |
+| `set-thinking` | `pi.setThinkingLevel` and `pi.getThinkingLevel` |
+| `set-mode` | `ctx.sessionModes.set` (interactive sessions only) |
+
+Every one of them needs `sessionId` and `generation` (reads included: a switch between a read and a change is refused
+with `stale_session` or `stale_generation`), and the changing ones are serialized with every other changing operation.
+Anything omp throws or refuses is `failed` with a fixed message (omp's own text can hold paths, so it goes to
+`events.log`, not to the client).
+
+#### `session-info`
+
+Read-only. `args` is ignored. Result:
+
+```json
+{"model":{"provider":"anthropic","id":"claude-opus-5-5"},"thinkingLevel":"high",
+ "thinkingLevels":["off","minimal","low","medium","high"],
+ "models":[{"provider":"anthropic","id":"claude-opus-5-5","name":"Claude Opus 5.5"}],
+ "mode":{"plan":false,"goal":false,"loop":false,"vibe":false},
+ "modeStatus":{"plan":"inactive","vibe":"inactive","goal":"paused","loop":"inactive"}}
+```
+
+`model` is `null` when no model is set. `thinkingLevel` is `null` when the host cannot say. `thinkingLevels` are the
+values `set-thinking` accepts for the **current** model: `off` plus the efforts the model supports, empty when it has no
+reasoning (omp's `auto` and `inherit` selectors are not offered). `models` are the models the session can switch to
+(omp's authenticated list), at most 200, with `provider` and `id` at most 128 units, `name` cut to 80, and entries
+without a usable `provider` and `id` left out; the list is halved until the whole result is under 48 KiB. `mode` is a
+boolean per built-in mode, true when its status is `active`; `modeStatus` (an added field, compatible) has the status
+itself, `inactive`, `active` or `paused`, so a client can tell a paused goal from a dropped one.
+
+#### `compact`
+
+Args: `instructions`, optional string of at most 2000 UTF-16 units (focus for the summary; blank means none). Result
+`{"ok": true}`.
+
+**`compact` returns when the compaction has finished**, not when it has started, so that a failure ("nothing to
+compact", a model error) is reported as `failed` instead of being lost, and so that a client that gets `{ok: true}`
+knows the context was replaced. A summary is a model call, so this operation has its own deadline of **180 s** (the
+other operations: 10 s). If it passes the client gets `timeout`: that means *not finished yet*, not *failed*. The
+compaction keeps running; until it settles, changing operations are refused **at once** with `mutation_pending` (not queued behind it), and `snapshot` and
+`session-info` still answer. The connection is not closed as idle while the request is unanswered. A client that cannot
+wait that long SHOULD give up on its own side and poll `snapshot` (`busy`) and `session-info`.
+
+A manual compaction in omp aborts a turn in flight. This operation never does that as a side effect: when a turn is
+running it answers `failed` ("the agent is busy; stop the turn before compacting") and does nothing; a client that
+wants it sends `abort` first.
+
+#### `set-model`
+
+Args: `provider` and `id`, strings of 1 to 128 UTF-16 units. The pair MUST be in `session-info.models`; otherwise
+`invalid_args` and nothing changes. Calls `pi.setModel`; omp returns false when it has no usable API key for that
+model, which is `failed`. Result `{"model": {"provider", "id"}}`, read back from the session. If omp reports success but
+the session's model is not the requested one, the reply is `failed` ("omp kept the previous model").
+
+#### `set-thinking`
+
+Args: `level`, a string that MUST be one of `session-info.thinkingLevels` for the current model (else `invalid_args`,
+with the list in `detail.thinkingLevels`). Result `{"thinkingLevel": <what the session reports now>}`; omp may clamp a
+level to a ceiling, so a client SHOULD show the result, not what it asked for.
+
+#### `set-mode`
+
+Args: `mode` (`plan`, `vibe`, `goal` or `loop`), `action` and, for entering goal mode only, `objective`. The accepted
+pairs are the ones omp's `ctx.sessionModes.set` has, minus starting a loop:
+
+| `mode` | `action` |
+|---|---|
+| `plan`, `vibe` | `enter`, `exit` |
+| `goal` | `enter` (needs `objective`: non-blank, at most 2000 UTF-16 units), `pause`, `resume`, `drop` |
+| `loop` | `exit` only: a loop needs a prompt and a limit, which are not offered remotely |
+
+Any other pair, or an `objective` where it does not apply, is `invalid_args`. Transitions are idempotent: result
+`{"changed": true|false}` (`false` when the state already held). When omp refuses (a turn, a compaction or another
+transition is running; another mode blocks this one; a setting disables the mode) the reply is `failed` with omp's
+reason code in the message (`busy`, `conflict`, `disabled`, `invalid_request`). No transition submits a prompt, and plan
+`exit` leaves plan mode without approving the plan or deleting its draft.
+
+
 ## 7. Limits
 
 | Limit | Value |
@@ -252,9 +342,9 @@ plan mode and clears into a new session (the omp process keeps running).
 | Frame size | 65 536 bytes; a longer line with no newline gets `too_large` and the connection closes |
 | Simultaneous clients | 4; a fifth gets `too_many_clients` and is closed |
 | Requests in flight | 16 across all clients; more get `overloaded` |
-| Idle connection | closed after 60 s without data (the plugin setting `idleTimeoutMs` / `OMP_SESSION_CONTROL_IDLE_MS`, 100 to 3 600 000 ms). Any received byte resets the timer |
+| Idle connection | closed after 60 s without data (the plugin setting `idleTimeoutMs` / `OMP_SESSION_CONTROL_IDLE_MS`, 100 to 3 600 000 ms). Any received byte resets the timer; a connection that has a request still unanswered is never closed as idle |
 | Incomplete frame | a frame must be complete 10 s after its first byte; a client that trickles bytes is disconnected whatever the idle timeout |
-| Operation | 10 s; after that the client gets `timeout` and the request stops counting against the in-flight limit |
+| Operation | 10 s (`compact`: 180 s); after that the client gets `timeout` and the request stops counting against the in-flight limit |
 | Open connections | at most 16 in total, accepted or turned away; beyond that a connection is dropped without a reply. A connection that was sent a final frame (`closing`, `too_many_clients`, `disabled`, `too_large`) is destroyed once the frame is flushed or after 2 s, whichever is first |
 | Unread replies | a client that lets more than 256 KiB of replies pile up unread is disconnected |
 | Name | 120 characters |
@@ -262,6 +352,9 @@ plan mode and clears into a new session (the omp process keeps running).
 | Registry title | 200 UTF-16 units, never splitting a surrogate pair; shortened further if the registry would pass 4096 bytes |
 | Plan feedback | 8000 UTF-16 units |
 | Plan role | 64 UTF-16 units |
+| Compact instructions | 2000 UTF-16 units |
+| Goal objective | 2000 UTF-16 units |
+| Model provider and id | 128 UTF-16 units each; `session-info` lists at most 200 models, names cut to 80 units |
 | Registry entry | 4096 bytes |
 | Reply `id` | an `id` that is not a string of at most 128 characters or a finite number is never echoed: the reply has `id: null`. Requests with such an id get `bad_request` |
 | Reply size | a reply never exceeds a frame (65 536 bytes); a reply that would is replaced by an `internal` error (`plan-review` sizes its chunk so that it does not). Rejected input (an unknown op name, an over-long id) is never reflected in a reply |

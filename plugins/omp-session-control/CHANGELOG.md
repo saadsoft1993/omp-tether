@@ -3,6 +3,28 @@
 All notable changes to `omp-session-control`. The wire protocol has its own number (`session-control/1`) and changes
 only by spec; see `docs/protocol/control-1.md` in the repository.
 
+## 0.3.0 (2026-11-16)
+
+Session commands from a dashboard (each is offered only when the host omp has the API behind it; omp 18.19.0 has them):
+
+- New operations `session-info` (current model, thinking level and the levels the model supports, the models the session
+  can switch to, and the status of the plan, vibe, goal and loop modes), `compact`, `set-model`, `set-thinking` and
+  `set-mode`. All five name the live session and generation; the changing ones are serialized with the other changing
+  operations. New error codes `unsupported` (the host lacks the API) and `failed` (omp threw or refused; the message is
+  fixed, the cause goes to `events.log`). Details: `docs/protocol/control-1.md`, section 6.
+- **`compact` returns when the compaction has finished**, with its own 180 s deadline (other operations: 10 s). A
+  `timeout` for `compact` means it is not finished yet, not that it failed; later changes are refused at once with
+  `mutation_pending` until omp settles it. It refuses (`failed`) while a turn is running instead of aborting the turn as omp's own manual
+  compaction does.
+- `set-mode` accepts what `ctx.sessionModes.set` accepts, except starting a loop (a loop needs a prompt and a limit):
+  plan and vibe enter/exit, goal enter (with an objective)/pause/resume/drop, loop exit.
+- A connection with a request that is still unanswered is no longer closed as idle (a compaction can take longer than
+  the 60 s idle timeout).
+- `ops` in the registry and in `snapshot` lists the new operations after the plan operations, for the ones the host has.
+- **What is now exposed changes.** A client of the socket can switch the session's model (spending against another
+  provider account), change its thinking level, start a compaction (which rewrites the context) and change plan, goal and
+  loop modes. See the updated threat model.
+
 ## 0.2.0 (2026-11-16)
 
 Plan review from a dashboard (needs an omp that has `ctx.getPendingPlanReview` and `ctx.resolvePlanReview`; 18.19.0 has them):

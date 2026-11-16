@@ -17,7 +17,36 @@ export interface FakeContext {
 	clearTimer(timer: NodeJS.Timeout): void;
 	getPendingPlanReview?(): PlanEvent | undefined;
 	resolvePlanReview?(reviewId: string, choice: string, input?: { feedback?: string; role?: string }): boolean;
+	compact?(instructions?: string): Promise<void>;
+	model?: FakeModel;
+	models?: { list(): FakeModel[]; current(): FakeModel | undefined };
+	sessionModes?: {
+		getState(): FakeModeState;
+		set(request: Record<string, unknown>): Promise<unknown>;
+	};
 }
+
+export interface FakeModel {
+	provider: string;
+	id: string;
+	name?: string;
+	reasoning?: boolean;
+	thinking?: { efforts: string[] };
+}
+export type FakeModeState = Record<"plan" | "vibe" | "goal" | "loop", { status: string }>;
+
+/** Which of omp's session-command APIs the fake host has. `true` gives all of them. */
+export interface SessionApis {
+	compact?: boolean;
+	models?: boolean;
+	setModel?: boolean;
+	thinking?: boolean;
+	modes?: boolean;
+}
+
+export const MODEL_A: FakeModel = { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5", reasoning: true, thinking: { efforts: ["minimal", "low", "medium", "high"] } };
+export const MODEL_B: FakeModel = { provider: "openai", id: "gpt-6.1-sol", name: "GPT 6.1 Sol", reasoning: true, thinking: { efforts: ["low", "high"] } };
+export const MODEL_C: FakeModel = { provider: "local", id: "plain", name: "Plain" };
 
 /** omp's PlanReviewRequestedEvent. */
 export interface PlanEvent {
@@ -52,6 +81,8 @@ export interface HostOptions {
 	timerScale?: number;
 	/** Give the context omp's plan-review methods (getPendingPlanReview, resolvePlanReview). Off by default, like an older omp. */
 	planReview?: boolean;
+	/** Give the context and pi omp's session-command APIs (compact, models, setModel, thinking, sessionModes). */
+	session?: boolean | SessionApis;
 }
 
 export class FakeHost {
@@ -80,6 +111,24 @@ export class FakeHost {
 	/** Keep the review pending after an accepted answer (a compaction runs behind the overlay). */
 	keepPendingAfterAnswer = false;
 	failGetPending = false;
+	/** State and injected behaviour of the fake session-command APIs. */
+	currentModel: FakeModel | undefined = MODEL_A;
+	available: FakeModel[] = [MODEL_A, MODEL_B, MODEL_C];
+	thinking: string | undefined = "high";
+	thinkingCeiling: string | undefined;
+	modes: FakeModeState = { plan: { status: "inactive" }, vibe: { status: "inactive" }, goal: { status: "inactive" }, loop: { status: "inactive" } };
+	compactCalls: Array<string | undefined> = [];
+	setModelCalls: FakeModel[] = [];
+	thinkingCalls: string[] = [];
+	modeCalls: Array<Record<string, unknown>> = [];
+	/** How the fake compaction ends: resolve, throw, or stay open until `releaseCompact` is called. */
+	compactBehaviour: "ok" | "throw" | "hang" = "ok";
+	releaseCompact: (() => void) | undefined;
+	setModelResult: boolean | "throw" | "ignore" = true;
+	setThinkingThrows = false;
+	modeResult: unknown = undefined;
+	modeThrows = false;
+	failModels = false;
 	private reviewCounter = 0;
 	readonly dir: string;
 	readonly root: string;
@@ -151,6 +200,39 @@ export class FakeHost {
 				return true;
 			};
 		}
+		const apis: SessionApis = opts.session === true ? { compact: true, models: true, setModel: true, thinking: true, modes: true } : (opts.session ?? {});
+		if (apis.compact) {
+			this.ctx.compact = async instructions => {
+				this.compactCalls.push(instructions);
+				if (this.compactBehaviour === "throw") throw new Error("injected compact failure: /home/secret/path");
+				if (this.compactBehaviour === "hang") await new Promise<void>(resolve => (this.releaseCompact = resolve));
+			};
+		}
+		if (apis.models) {
+			this.ctx.models = {
+				list: () => {
+					if (this.failModels) throw new Error("injected models failure");
+					return structuredClone(this.available);
+				},
+				current: () => this.currentModel,
+			};
+			Object.defineProperty(this.ctx, "model", { get: () => this.currentModel, enumerable: true });
+		}
+		if (apis.modes) {
+			this.ctx.sessionModes = {
+				getState: () => structuredClone(this.modes),
+				set: async request => {
+					this.modeCalls.push(request);
+					if (this.modeThrows) throw new Error("injected set failure");
+					if (this.modeResult !== undefined) return this.modeResult;
+					const key = request.mode as keyof FakeModeState;
+					const status = request.action === "enter" || request.action === "resume" ? "active" : request.action === "pause" ? "paused" : "inactive";
+					const changed = this.modes[key].status !== status;
+					this.modes[key].status = status;
+					return { ok: true, changed, state: structuredClone(this.modes) };
+				},
+			};
+		}
 		this.pi = {
 			on: (event: string, handler: Handler) => {
 				this.handlers.set(event, [...(this.handlers.get(event) ?? []), handler]);
@@ -166,6 +248,22 @@ export class FakeHost {
 			},
 			pi: { settings: {} },
 		};
+		if (apis.setModel) {
+			this.pi.setModel = async (model: FakeModel) => {
+				this.setModelCalls.push(model);
+				if (this.setModelResult === "throw") throw new Error("injected setModel failure: /home/secret/path");
+				if (this.setModelResult === true) this.currentModel = this.available.find(m => m.provider === model.provider && m.id === model.id);
+				return this.setModelResult === "ignore" ? true : this.setModelResult;
+			};
+		}
+		if (apis.thinking) {
+			this.pi.getThinkingLevel = () => this.thinking;
+			this.pi.setThinkingLevel = (level: string) => {
+				this.thinkingCalls.push(level);
+				if (this.setThinkingThrows) throw new Error("injected setThinkingLevel failure");
+				this.thinking = this.thinkingCeiling ?? level;
+			};
+		}
 	}
 
 	static async start(opts: HostOptions = {}): Promise<FakeHost> {

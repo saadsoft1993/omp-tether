@@ -24,13 +24,19 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 export const PLUGIN_NAME = "omp-session-control";
-export const PLUGIN_VERSION = "0.2.0";
+export const PLUGIN_VERSION = "0.3.0";
 /** Wire protocol versions this build speaks (docs/protocol/control-1.md). */
 export const PROTOCOL_VERSIONS: readonly number[] = [1];
 const PROTOCOL_VERSION = 1;
 export const OPS = ["snapshot", "abort", "rename"] as const;
 /** Offered only when the host has ctx.getPendingPlanReview and ctx.resolvePlanReview (feature-detected). */
 export const PLAN_OPS = ["plan-review", "plan-answer"] as const;
+/**
+ * Session commands. Each is offered only when the host has the API behind it (see supportsSessionOp), in this order,
+ * after the base and plan operations.
+ */
+export const SESSION_OPS = ["session-info", "compact", "set-model", "set-thinking", "set-mode"] as const;
+type SessionOp = (typeof SESSION_OPS)[number];
 
 const MAX_FRAME_BYTES = 64 * 1024;
 const MAX_CLIENTS = 4;
@@ -43,6 +49,18 @@ const MAX_REGISTRY_BYTES = 4096;
 const MAX_WRITE_BACKLOG = 256 * 1024; // a client that never reads its replies is cut off
 const MAX_CONNECTIONS = MAX_CLIENTS + 12; // beyond this, connections are dropped without a reply
 const OP_TIMEOUT_MS = 10_000; // an operation omp does not finish by then gets a `timeout` reply
+/**
+ * `compact` returns once the compaction has finished, so it gets a longer deadline: a summary is a model call. A
+ * `timeout` reply then means "not finished yet", not "failed": the compaction goes on, and further changes are refused
+ * with `mutation_pending` until omp settles it.
+ */
+const COMPACT_TIMEOUT_MS = 180_000;
+const MAX_INSTRUCTIONS_CHARS = 2000;
+const MAX_OBJECTIVE_CHARS = 2000;
+const MAX_MODEL_FIELD_CHARS = 128;
+const MAX_MODEL_NAME_CHARS = 80;
+const MAX_MODELS = 200;
+const MAX_INFO_BYTES = 48 * 1024; // the session-info result stays well inside one frame
 const FRAME_DEADLINE_MS = 10_000; // a frame must be complete this long after its first byte
 const RECHECK_MS = 2_000; // while there is something to wait for, look at the files again this often (see reconcile)
 const CLOSE_GRACE_MS = 2_000; // a socket we have said goodbye to is destroyed after this, whatever the peer does
@@ -51,9 +69,30 @@ const MIN_IDLE_TIMEOUT_MS = 100;
 const MAX_IDLE_TIMEOUT_MS = 3_600_000;
 export const EXTENSION_ID = `extension-module:${path.basename(import.meta.path, path.extname(import.meta.path))}`;
 
-const MUTATING: Readonly<Record<string, boolean>> = { snapshot: false, abort: true, rename: true, "plan-review": false, "plan-answer": true };
+const MUTATING: Readonly<Record<string, boolean>> = {
+	snapshot: false,
+	abort: true,
+	rename: true,
+	"plan-review": false,
+	"plan-answer": true,
+	"session-info": false,
+	compact: true,
+	"set-model": true,
+	"set-thinking": true,
+	"set-mode": true,
+};
 /** Operations that must name the live session and generation (reads of the plan included: a switch between reads is refused). */
-const TARGET_CHECKED: Readonly<Record<string, true>> = { abort: true, rename: true, "plan-review": true, "plan-answer": true };
+const TARGET_CHECKED: Readonly<Record<string, true>> = {
+	abort: true,
+	rename: true,
+	"plan-review": true,
+	"plan-answer": true,
+	"session-info": true,
+	compact: true,
+	"set-model": true,
+	"set-thinking": true,
+	"set-mode": true,
+};
 const MAX_REVIEW_ID_CHARS = 128;
 const MAX_REGISTRY_TITLE_CHARS = 200;
 const MAX_FEEDBACK_CHARS = 8000;
@@ -348,6 +387,8 @@ interface Client {
 	/** Deadline for the frame being received; set while a partial frame sits in `buffer`. */
 	frame: Timer | undefined;
 	dead: boolean;
+	/** Requests accepted from this client and not answered yet: a client waiting for a slow one is not idle. */
+	pending: number;
 }
 
 type Activation =
@@ -476,6 +517,68 @@ export function fitTitle(title: string, fits: (t: string) => boolean): string | 
 	return points.slice(0, lo).join("");
 }
 
+const isSessionOp = (op: string): op is SessionOp => (SESSION_OPS as readonly string[]).includes(op);
+const isFn = (value: unknown): boolean => typeof value === "function";
+
+/** What the host offers, looked up at the time of use: an older omp lacks some of it. */
+interface HostSurface {
+	models?: { list?: unknown; current?: unknown };
+	sessionModes?: { set?: unknown; getState?: unknown };
+	compact?: unknown;
+}
+
+function supportsSessionOp(op: SessionOp, c: unknown, pi?: unknown): boolean {
+	const host = (c ?? {}) as HostSurface;
+	const api = (pi ?? {}) as Record<string, unknown>;
+	switch (op) {
+		case "session-info":
+			return isFn(host.models?.list) || isFn(host.sessionModes?.getState) || isFn(api.getThinkingLevel);
+		case "compact":
+			return isFn(host.compact);
+		case "set-model":
+			return isFn(api.setModel) && isFn(host.models?.list);
+		case "set-thinking":
+			return isFn(api.setThinkingLevel) && isFn(api.getThinkingLevel);
+		case "set-mode":
+			return isFn(host.sessionModes?.set);
+	}
+}
+
+interface ModelRef {
+	provider: string;
+	id: string;
+	name?: string;
+}
+
+/** A model from the host as provider, id and a bounded name; undefined when it has no usable provider and id. */
+function readModel(value: unknown, withName: boolean): ModelRef | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const m = value as Record<string, unknown>;
+	if (typeof m.provider !== "string" || typeof m.id !== "string") return undefined;
+	if (m.provider === "" || m.id === "" || m.provider.length > MAX_MODEL_FIELD_CHARS || m.id.length > MAX_MODEL_FIELD_CHARS) return undefined;
+	const out: ModelRef = { provider: m.provider, id: m.id };
+	if (withName && typeof m.name === "string" && m.name !== "") out.name = m.name.slice(0, MAX_MODEL_NAME_CHARS);
+	return out;
+}
+
+/** The thinking levels a model can be set to: off plus its efforts; none for a model without reasoning. */
+function thinkingLevelsOf(model: unknown): string[] {
+	if (!model || typeof model !== "object") return [];
+	const m = model as { reasoning?: unknown; thinking?: { efforts?: unknown } };
+	if (m.reasoning !== true) return [];
+	const efforts = Array.isArray(m.thinking?.efforts) ? (m.thinking?.efforts as unknown[]).filter((e): e is string => typeof e === "string" && e !== "") : [];
+	return ["off", ...efforts.filter(e => e !== "off")];
+}
+
+const MODE_STATUS_KEYS = ["plan", "vibe", "goal", "loop"] as const;
+/** Allowed mode/action pairs. Loop can only be switched off remotely: starting one needs a prompt and a limit. */
+const MODE_ACTIONS: Readonly<Record<string, readonly string[]>> = {
+	plan: ["enter", "exit"],
+	vibe: ["enter", "exit"],
+	goal: ["enter", "pause", "resume", "drop"],
+	loop: ["exit"],
+};
+
 export default async function ompSessionControl(pi: ExtensionAPI): Promise<void> {
 	// -- settings -----------------------------------------------------------------------------------------------------
 	const home = process.env.HOME || os.homedir();
@@ -576,6 +679,8 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	let liveDisableProblem = "";
 	/** A host mutation (rename, abort) that was started and has not settled yet, even if its request timed out. */
 	let hostMutationRunning = false;
+	/** A compaction is in progress in omp (started by `compact`, not yet settled): other changes are refused at once, not queued behind it. */
+	let compactionRunning = false;
 	/** True once the socket is bound and the registry published; the registry is never written before. */
 	let listening = false;
 	/** Counts listener starts; requests accepted by an earlier listener never touch the current one's counters. */
@@ -637,7 +742,11 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		}
 	};
 
-	const opsFor = (c: ExtensionContext | undefined): readonly string[] => (planHost(c) ? [...OPS, ...PLAN_OPS] : OPS);
+	const opsFor = (c: ExtensionContext | undefined): readonly string[] => [
+		...OPS,
+		...(planHost(c) ? PLAN_OPS : []),
+		...SESSION_OPS.filter(op => supportsSessionOp(op, c, pi)),
+	];
 
 	/** The registry text, at most MAX_REGISTRY_BYTES: a long plan title is cut to fit, never the other fields. */
 	const registryText = (c: ExtensionContext): string => {
@@ -722,7 +831,10 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	const touch = (client: Client): void => {
 		clearIdle(client);
 		if (client.dead || !ctx) return;
-		client.idle = ctx.setTimeout(() => client.sock.destroy(), IDLE_TIMEOUT_MS);
+		client.idle = ctx.setTimeout(() => {
+			if (client.pending > 0) touch(client);
+			else client.sock.destroy();
+		}, IDLE_TIMEOUT_MS);
 	};
 
 	const clearFrame = (client: Client): void => {
@@ -851,6 +963,16 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				return readPlan(c, req);
 			case "plan-answer":
 				return answerPlan(c, req.args);
+			case "session-info":
+				return sessionInfo(c);
+			case "compact":
+				return compactSession(c, req.args);
+			case "set-model":
+				return setModel(c, req.args);
+			case "set-thinking":
+				return setThinking(c, req.args);
+			case "set-mode":
+				return setMode(c, req.args);
 			default:
 				throw new ControlError("unknown_op", `unknown op ${req.op}`);
 		}
@@ -943,14 +1065,174 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		return { accepted: true };
 	};
 
+	// -- session commands ---------------------------------------------------------------------------------------------
+
+	/** The error for something omp threw or refused. omp's own text can hold paths, so the client gets a fixed message. */
+	const hostFailed = (op: string, error: unknown): ControlError => {
+		if (error instanceof ControlError) return error;
+		logEvent("op_error", { op, ...failure(error) });
+		return new ControlError("failed", `omp could not run ${op}`);
+	};
+
+	const requireSupport = (op: SessionOp, c: ExtensionContext): void => {
+		if (!supportsSessionOp(op, c, pi)) throw new ControlError("unsupported", "this omp does not offer that operation");
+	};
+
+	const piApi = pi as unknown as {
+		getThinkingLevel?: () => unknown;
+		setThinkingLevel?: (level: string) => void;
+		setModel?: (model: unknown) => Promise<boolean>;
+	};
+
+	const currentModel = (c: ExtensionContext): unknown => {
+		const query = (c as unknown as HostSurface).models as { current?: () => unknown } | undefined;
+		return isFn(query?.current) ? query?.current?.() : (c as { model?: unknown }).model;
+	};
+	const availableModels = (c: ExtensionContext): unknown[] => {
+		const query = (c as unknown as HostSurface).models as { list?: () => unknown } | undefined;
+		const list = isFn(query?.list) ? query?.list?.() : [];
+		return Array.isArray(list) ? list : [];
+	};
+	const currentThinking = (): string | null => {
+		const level = isFn(piApi.getThinkingLevel) ? piApi.getThinkingLevel?.() : undefined;
+		return typeof level === "string" ? level : null;
+	};
+	const modeState = (c: ExtensionContext): Record<string, { status?: unknown }> | undefined => {
+		const modes = (c as unknown as { sessionModes?: { getState?: () => unknown } }).sessionModes;
+		if (!isFn(modes?.getState)) return undefined;
+		const state = modes?.getState?.();
+		return state && typeof state === "object" ? (state as Record<string, { status?: unknown }>) : undefined;
+	};
+
+	const sessionInfo = (c: ExtensionContext): unknown => {
+		requireSupport("session-info", c);
+		try {
+			const modelObject = currentModel(c);
+			const state = modeState(c);
+			const modes = { plan: false, goal: false, loop: false, vibe: false };
+			const modeStatus: Record<string, string> = {};
+			for (const key of MODE_STATUS_KEYS) {
+				const status = state?.[key]?.status;
+				modes[key] = status === "active";
+				modeStatus[key] = typeof status === "string" ? status : "inactive";
+			}
+			const models: ModelRef[] = [];
+			for (const m of availableModels(c)) {
+				const ref = readModel(m, true);
+				if (ref) models.push(ref);
+				if (models.length >= MAX_MODELS) break;
+			}
+			const build = () => ({
+				model: readModel(modelObject, false) ?? null,
+				thinkingLevel: currentThinking(),
+				thinkingLevels: thinkingLevelsOf(modelObject),
+				models,
+				mode: modes,
+				modeStatus,
+			});
+			let result = build();
+			while (models.length > 0 && Buffer.byteLength(JSON.stringify(result)) > MAX_INFO_BYTES) {
+				models.length = Math.floor(models.length / 2);
+				result = build();
+			}
+			return result;
+		} catch (error) {
+			throw hostFailed("session-info", error);
+		}
+	};
+
+	const compactSession = async (c: ExtensionContext, args: Record<string, unknown>): Promise<unknown> => {
+		requireSupport("compact", c);
+		const { instructions } = args;
+		if (instructions !== undefined && (typeof instructions !== "string" || instructions.length > MAX_INSTRUCTIONS_CHARS)) {
+			throw new ControlError("invalid_args", `instructions must be a string of at most ${MAX_INSTRUCTIONS_CHARS} characters`);
+		}
+		// A manual compaction aborts a turn in flight: that is never done as a side effect of this request.
+		if (!c.isIdle()) throw new ControlError("failed", "the agent is busy; stop the turn before compacting");
+		try {
+			// Resolves when the compaction has finished (or there was nothing to compact); rejects when it failed.
+			compactionRunning = true;
+			await (instructions === undefined || instructions.trim() === "" ? c.compact() : c.compact(instructions));
+		} catch (error) {
+			throw hostFailed("compact", error);
+		} finally {
+			compactionRunning = false;
+		}
+		return { ok: true };
+	};
+
+	const modelArg = (value: unknown, name: string): string => {
+		if (typeof value !== "string" || value === "" || value.length > MAX_MODEL_FIELD_CHARS) {
+			throw new ControlError("invalid_args", `${name} must be a string of 1 to ${MAX_MODEL_FIELD_CHARS} characters`);
+		}
+		return value;
+	};
+
+	const setModel = async (c: ExtensionContext, args: Record<string, unknown>): Promise<unknown> => {
+		requireSupport("set-model", c);
+		const provider = modelArg(args.provider, "provider");
+		const id = modelArg(args.id, "id");
+		try {
+			const target = availableModels(c).find(m => {
+				const ref = readModel(m, false);
+				return ref?.provider === provider && ref.id === id;
+			});
+			if (!target) throw new ControlError("invalid_args", "that model is not available in this session");
+			if ((await piApi.setModel?.(target)) !== true) throw new ControlError("failed", "omp did not switch: no usable API key for that model");
+			const now = readModel(currentModel(c), false);
+			if (now && (now.provider !== provider || now.id !== id)) throw new ControlError("failed", "omp kept the previous model");
+			return { model: now ?? { provider, id } };
+		} catch (error) {
+			throw hostFailed("set-model", error);
+		}
+	};
+
+	const setThinking = (c: ExtensionContext, args: Record<string, unknown>): unknown => {
+		requireSupport("set-thinking", c);
+		const { level } = args;
+		if (typeof level !== "string" || level === "" || level.length > 32) throw new ControlError("invalid_args", "level must be a non-empty string");
+		try {
+			const levels = thinkingLevelsOf(currentModel(c));
+			if (!levels.includes(level)) throw new ControlError("invalid_args", "level is not available for the current model", { thinkingLevels: levels });
+			piApi.setThinkingLevel?.(level);
+			return { thinkingLevel: currentThinking() };
+		} catch (error) {
+			throw hostFailed("set-thinking", error);
+		}
+	};
+
+	const setMode = async (c: ExtensionContext, args: Record<string, unknown>): Promise<unknown> => {
+		requireSupport("set-mode", c);
+		const { mode, action, objective } = args;
+		if (typeof mode !== "string" || !Object.hasOwn(MODE_ACTIONS, mode)) throw new ControlError("invalid_args", "mode must be plan, vibe, goal or loop");
+		if (typeof action !== "string" || !(MODE_ACTIONS[mode] as readonly string[]).includes(action)) {
+			throw new ControlError("invalid_args", `${mode} accepts only: ${(MODE_ACTIONS[mode] as readonly string[]).join(", ")}`);
+		}
+		if (objective !== undefined && (typeof objective !== "string" || objective.length > MAX_OBJECTIVE_CHARS)) {
+			throw new ControlError("invalid_args", `objective must be a string of at most ${MAX_OBJECTIVE_CHARS} characters`);
+		}
+		const goalEnter = mode === "goal" && action === "enter";
+		if (goalEnter && (typeof objective !== "string" || objective.trim() === "")) throw new ControlError("invalid_args", "entering goal mode needs a non-blank objective");
+		if (!goalEnter && objective !== undefined) throw new ControlError("invalid_args", "objective applies only to entering goal mode");
+		const request = goalEnter ? { mode, action, objective } : { mode, action };
+		try {
+			const modes = (c as unknown as { sessionModes: { set(request: unknown): Promise<unknown> } }).sessionModes;
+			const result = (await modes.set(request)) as { ok?: unknown; changed?: unknown; code?: unknown } | undefined;
+			if (result?.ok === true) return { changed: result.changed === true };
+			const code = typeof result?.code === "string" && /^[a-z_]{1,32}$/.test(result.code) ? result.code : "refused";
+			throw new ControlError("failed", `omp refused the change: ${code}`);
+		} catch (error) {
+			throw hostFailed("set-mode", error);
+		}
+	};
+
 	/** Runs the operation, but not for longer than OP_TIMEOUT_MS: a hung omp call must not wedge control. */
 	const runWithDeadline = async (c: ExtensionContext, req: Request): Promise<unknown> => {
 		let timer: Timer | undefined;
 		const deadline = new Promise<never>((_resolve, reject) => {
-			timer = c.setTimeout(
-				() => reject(new ControlError("timeout", `omp did not finish ${req.op} within ${OP_TIMEOUT_MS / 1000} s`)),
-				OP_TIMEOUT_MS,
-			);
+			const limit = req.op === "compact" ? COMPACT_TIMEOUT_MS : OP_TIMEOUT_MS;
+			const note = req.op === "compact" ? "; it may still be running" : "";
+			timer = c.setTimeout(() => reject(new ControlError("timeout", `omp did not finish ${req.op} within ${limit / 1000} s${note}`)), limit);
 		});
 		// A mutation keeps the host busy until omp settles it, however long that takes: the flag is cleared by the
 		// operation itself, not by this deadline, so a timed-out change cannot overlap the next one.
@@ -997,6 +1279,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		}
 		if (typeof frame.op !== "string" || !Object.hasOwn(MUTATING, frame.op)) return fail("unknown_op", "unknown op");
 		if ((PLAN_OPS as readonly string[]).includes(frame.op) && ctx && !planHost(ctx)) return fail("unknown_op", "unknown op");
+		if (isSessionOp(frame.op) && ctx && !supportsSessionOp(frame.op, ctx, pi)) return fail("unsupported", "this omp does not offer that operation");
 		if (frame.args !== undefined && (typeof frame.args !== "object" || frame.args === null || Array.isArray(frame.args))) {
 			return fail("invalid_args", "args must be an object");
 		}
@@ -1007,8 +1290,10 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			op: frame.op,
 			args: (frame.args as Record<string, unknown> | undefined) ?? {},
 		};
+		if (MUTATING[req.op] && compactionRunning) return fail("mutation_pending", "a compaction is still running in omp");
 		if (outstanding >= MAX_OUTSTANDING) return fail("overloaded", "too many requests in flight");
 		outstanding += 1;
+		client.pending += 1;
 		const epoch = listenerEpoch;
 		const execute = async (): Promise<void> => {
 			try {
@@ -1027,6 +1312,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				reply(sock, { id, ok: false, code: ce.code, message: ce.message, ...(ce.detail !== undefined ? { detail: ce.detail } : {}) });
 			} finally {
 				if (epoch === listenerEpoch) outstanding -= 1;
+				client.pending -= 1;
 			}
 		};
 		if (MUTATING[req.op]) mutationChain = mutationChain.then(() => guardedAsync("mutation", execute));
@@ -1039,7 +1325,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		if (clients.size >= MAX_CLIENTS) {
 			return sayGoodbye(sock, { id: null, ok: false, code: "too_many_clients", message: `max ${MAX_CLIENTS}` });
 		}
-		const client: Client = { sock, buffer: Buffer.alloc(0), idle: undefined, frame: undefined, dead: false };
+		const client: Client = { sock, buffer: Buffer.alloc(0), idle: undefined, frame: undefined, dead: false, pending: 0 };
 		clients.add(client);
 		touch(client);
 		sock.on(
