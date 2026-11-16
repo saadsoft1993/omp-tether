@@ -26,10 +26,11 @@ Session commands from a dashboard (each is offered only when the host omp has th
 - While one of our changes is unsettled (a `set-model` waiting inside omp, a compaction, even after a `timeout`), the
   plugin cancels a session replacement (`session_before_switch`, `session_before_branch`), so a change cannot land on
   the replacement session.
-- When the plugin lets a session replacement through, changing operations get `busy` until omp reports the commit
-  (`session_switch`, `session_branch`, `session_start`, `session_shutdown`) or a turn starts in the same session (the
-  replacement was cancelled elsewhere). No timer ends the hold: a slow replacement can take longer than any timeout. A
-  change admitted between the veto check and the commit cannot land on the new session. The veto does not depend on the
+- When the plugin lets a session replacement through, changing operations get `busy` until omp reports a lifecycle
+  event (`session_switch`, `session_branch`, `session_start`, `session_shutdown`), so a change admitted between the
+  veto check and the commit cannot land on the new session. No timer and no turn event ends the hold (fork and branch
+  never disconnect the agent, so the old loop can still report turns). If another extension cancels the replacement,
+  omp emits nothing and remote changes stay refused until the session is restarted. The veto does not depend on the
   terminal notice succeeding.
 - A connection with a request that is still unanswered is no longer closed as idle (a compaction can take longer than
   the 60 s idle timeout).

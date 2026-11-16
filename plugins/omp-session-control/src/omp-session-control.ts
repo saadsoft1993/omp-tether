@@ -692,30 +692,22 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	/**
 	 * A replacement of the session (switch, new, fork, branch) that we allowed may be committing. omp gives an extension
 	 * no way to ask, hooks get up to 30 s each and run one after the other, then come the abort and a flush, so a
-	 * replacement can take arbitrarily long and no timer can say it is over. The hold therefore fails closed: it ends only
-	 * on positive evidence.
-	 * - Commit: session_switch, session_branch, session_start, session_shutdown.
-	 * - The command ended without replacing anything (another hook cancelled it, and omp then emits nothing): an
-	 *   agent_start or turn_start of the SAME session. newSession (agent-session.ts ~11776), switchSession (~13511) and
-	 *   branch (~13948) all run inside #beginSessionTransition and call #disconnectFromAgent() (~6321) right after their
-	 *   before-hooks and before the abort. That drops the agent subscription that emits agent_start/turn_start to
-	 *   extensions (~5945), so once a transcript is being replaced the old session cannot report a turn start.
-	 * `input` is deliberately not evidence: input-controller.ts:1077 emits it at submit time, before and independently
-	 * of any transition.
+	 * replacement can take arbitrarily long and no timer can say it is over. The hold therefore fails closed and ends only
+	 * on a session lifecycle event: session_switch, session_branch, session_start or session_shutdown.
+	 * Turn events are NOT evidence that a replacement was cancelled: fork and branch-into-new-session never disconnect the
+	 * agent (agent-session.ts ~11927-12017, ~13969-14075), so the old loop can still emit turn_start while a successful
+	 * replacement is pending. The cost: when another extension's hook cancels the replacement omp emits nothing, and
+	 * the hold stays until the session restarts.
 	 */
-	let replacingSessionId: string | undefined;
-	const replacing = (): boolean => replacingSessionId !== undefined;
+	let replacing = false;
 	const clearReplacing = (): void => {
-		replacingSessionId = undefined;
+		replacing = false;
 	};
 	const markReplacing = (): void => {
-		replacingSessionId = currentSessionId();
-	};
-	const releaseReplacingOnTurn = (): void => {
-		if (replacingSessionId !== undefined && currentSessionId() === replacingSessionId) clearReplacing();
+		replacing = true;
 	};
 	const REPLACING_MESSAGE =
-		"Session is switching, or a switch was cancelled; send any prompt in the terminal or restart to re-enable.";
+		"Session is switching. If a switch was cancelled by another extension, restart the session to re-enable remote changes.";
 	/** An omp-started compaction (auto-compaction) is in progress, from its start and end events. */
 	let autoCompacting = false;
 	/** `session_compact` events seen, and the waiters that want the next one. */
@@ -1349,7 +1341,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			op: frame.op,
 			args: (frame.args as Record<string, unknown> | undefined) ?? {},
 		};
-		if (MUTATING[req.op] && replacing()) return fail("busy", REPLACING_MESSAGE);
+		if (MUTATING[req.op] && replacing) return fail("busy", REPLACING_MESSAGE);
 		if (MUTATING[req.op] && compactionRunning) return fail("mutation_pending", "a compaction is still running in omp");
 		if (outstanding >= MAX_OUTSTANDING) return fail("overloaded", "too many requests in flight");
 		outstanding += 1;
@@ -1361,7 +1353,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				if (client.dead || epoch !== listenerEpoch) return;
 				if (off()) throw new ControlError("disabled", "session control is turned off");
 				if (Object.hasOwn(TARGET_CHECKED, req.op)) checkTarget(req); // re-checked when the operation actually starts
-				if (MUTATING[req.op] && replacing()) throw new ControlError("busy", REPLACING_MESSAGE); // re-checked when it starts
+				if (MUTATING[req.op] && replacing) throw new ControlError("busy", REPLACING_MESSAGE); // re-checked when it starts
 				if (MUTATING[req.op] && hostMutationRunning) throw new ControlError("mutation_pending", "an earlier change has not finished in omp yet");
 				reply(sock, { id, ok: true, result: await runWithDeadline(requireCtx(), req) });
 			} catch (error) {
@@ -1713,7 +1705,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		if (!ctx || !isMainTui(c)) return undefined;
 		if (!(hostMutationRunning || compactionRunning)) {
 			// Allowed. Other hooks, the abort and the flush still run before omp commits, and a change admitted in that gap
-			// would land on the replacement: refuse changes from here until positive evidence (see replacingSessionId).
+			// would land on the replacement: refuse changes from here until a lifecycle event (see `replacing`).
 			markReplacing();
 			return undefined;
 		}
@@ -1736,8 +1728,6 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	pi.on("auto_compaction_end", guarded("auto_compaction_end", () => void (autoCompacting = false)));
 	pi.on("session_switch", guarded("session_switch", onSessionReplaced("session_switch")));
 	pi.on("session_branch", guarded("session_branch", onSessionReplaced("session_branch")));
-	pi.on("agent_start", guarded("agent_start", releaseReplacingOnTurn));
-	pi.on("turn_start", guarded("turn_start", releaseReplacingOnTurn));
 	pi.on(
 		"session_shutdown",
 		guarded("session_shutdown", (_event: unknown, c: ExtensionContext) => {
