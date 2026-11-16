@@ -469,11 +469,59 @@ describe("a session replacement cannot land while one of our changes is unsettle
 		expect((await c.request(frame("set-thinking", { level: "low" }, { sessionId: reg.sessionId, generation: reg.generation }))).ok).toBe(true);
 	});
 
-	test("a replacement that another hook cancelled holds changes back only until the expiry", async () => {
-		await boot({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } }); // 30 s becomes 300 ms
+	const BUSY_TEXT = "Session is switching, or a switch was cancelled; send any prompt in the terminal or restart to re-enable.";
+
+	test("a slow successful replacement is still held after 30 s, then the commit lands, and the old request is stale", async () => {
+		await boot({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } }); // 30 s of omp time is 300 ms here
 		expect(await host.cancelled("session_before_switch", { reason: "resume" })).toBe(false);
+		await new Promise(r => setTimeout(r, 450)); // more than 30 s of fake time: hooks, abort and flush are still running
+		const still = await call("set-model", { provider: "openai", id: "gpt-6.1-sol" });
+		expect(still).toMatchObject({ ok: false, code: "busy", message: BUSY_TEXT });
+		expect(host.setModelCalls).toEqual([]);
+		// a turn of the OLD session cannot release it either (it cannot happen mid-replacement, and an unrelated id never counts)
+		host.sessionId = "01a1b65b-4444-7000-8000-000000000004"; // the commit: the session id changed, session_switch not yet delivered
+		await host.emit("turn_start", { type: "turn_start" });
 		expect((await call("set-thinking", { level: "low" })).code).toBe("busy");
-		await new Promise(r => setTimeout(r, 450));
+		await host.fire("session_switch");
+		// the commit landed: the request that named the old session is refused as stale, never applied to the new one
+		expect((await c.request(frame("set-model", { provider: "openai", id: "gpt-6.1-sol" }))).code).toBe("stale_session");
+		expect(host.setModelCalls).toEqual([]);
+	});
+
+	test("a cancelled replacement is released by an agent_start or turn_start of the same session, not by time", async () => {
+		await boot({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } });
+		for (const event of ["agent_start", "turn_start"]) {
+			expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(false);
+			await new Promise(r => setTimeout(r, 400)); // well past 30 s of omp time
+			expect((await call("set-thinking", { level: "low" })).code).toBe("busy");
+			await host.emit(event, { type: event });
+			expect((await call("set-thinking", { level: "low" })).ok).toBe(true);
+		}
+		expect(await host.cancelled("session_before_branch", { reason: "fork", entryId: "e" })).toBe(false);
+		await host.emit("agent_start", { type: "agent_start" });
+		expect((await call("set-mode", { mode: "plan", action: "enter" })).ok).toBe(true);
+	});
+
+	test("a turn event that belongs to another session id releases nothing, and neither does an input event", async () => {
+		await boot();
+		expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(false);
+		host.sessionId = "01a1b65b-5555-7000-8000-000000000005";
+		await host.emit("agent_start", { type: "agent_start" });
+		await host.emit("turn_start", { type: "turn_start" });
+		await host.emit("input", { type: "input", text: "hello", source: "interactive" });
+		const reg = host.registry()?.data as Record<string, any>;
+		const r = await c.request(frame("set-thinking", { level: "low" }, { sessionId: host.sessionId, generation: reg.generation }));
+		expect(r.code).toBe("busy");
+		host.sessionId = "01a1b65b-1111-7000-8000-000000000001"; // back to the session the hold was set for
+		await host.emit("input", { type: "input", text: "hello", source: "interactive" });
+		expect((await call("set-thinking", { level: "low" })).code).toBe("busy");
+	});
+
+	test("shutdown and session_start clear the hold", async () => {
+		await boot();
+		expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(false);
+		await host.fire("session_start");
+		expect((await call("session-info")).ok).toBe(true);
 		expect((await call("set-thinking", { level: "low" })).ok).toBe(true);
 	});
 
