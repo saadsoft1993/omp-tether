@@ -16,6 +16,7 @@ import { pluginRoot } from "./paths";
 import { servedPathProblem } from "./trustwalk";
 
 export const BUILD_META_FILE = ".omp-private-relay-build.json";
+export const LOCAL_BUILD_ASSET = "(built locally)";
 export const MAX_FILES = 500;
 export const MAX_ASSET_BYTES = 64 * 1024 * 1024;
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
@@ -27,6 +28,8 @@ export interface WebBuild {
 	bun: string;
 	asset: string;
 	sha256: string;
+	/** Set only by a local rebuild using the current patch checks. */
+	localPatchVersion?: 1;
 	treeSha256: string;
 	/** sha256 of the NOTICE file inside the archive. It is outside treeSha256, so editing it is a visible, separate change. */
 	noticeSha256: string;
@@ -263,6 +266,7 @@ export interface InstalledBuild {
 	treeSha256: string;
 	/** Absent in records written by older versions; such an install is "legacy", never verified. */
 	noticeSha256?: string;
+	localPatchVersion?: 1;
 	asset: string;
 	installedAt: string;
 }
@@ -390,6 +394,7 @@ export function installTree(files: ReadonlyMap<string, Uint8Array>, build: WebBu
 			treeSha256: build.treeSha256,
 			noticeSha256: build.noticeSha256,
 			asset: build.asset,
+			...(build.localPatchVersion === 1 ? { localPatchVersion: 1 as const } : {}),
 			installedAt: new Date().toISOString(),
 		};
 		let created = false;

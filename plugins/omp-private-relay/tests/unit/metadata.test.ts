@@ -83,6 +83,21 @@ describe("package, catalog, changelog and compat.json agree", () => {
 	});
 });
 
+test("web patch makes both revocation and host disconnect terminal and checks their bundled messages", () => {
+	const build = read(PLUGIN_ROOT, "scripts", "build-web.sh");
+	expect(build).toContain('patch="$here/patches/collab-web-$minor.patch"');
+	for (const [code, message] of [
+		["4401", "this browser is not paired with the relay"],
+		["4409", "disconnected by the host; reload to reconnect"],
+	]) {
+		for (const minor of ["18.18", "18.19"]) {
+			const patch = read(PLUGIN_ROOT, "patches", `collab-web-${minor}.patch`);
+			expect(patch).toContain(`+\t${code}: "${message}`);
+		}
+		expect(build).toContain(message);
+	}
+});
+
 describe("documentation", () => {
 	const readme = read(PLUGIN_ROOT, "README.md");
 

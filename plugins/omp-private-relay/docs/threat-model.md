@@ -35,6 +35,17 @@ omp. It can also open the relay's host listener, ask for `/stats`, pair a browse
 could already do more by acting on your sessions directly. **If you do not trust the programs running under your account,
 do not run this.**
 
+The host listener's `/viewers` and `/disconnect` endpoints require a fresh timestamp, a one-use nonce and an HMAC under
+the private check key; their successful responses carry a proof over the exact response bytes. They refuse browser-origin
+and forwarded requests, and are unavailable on the guest listener. Viewer metadata includes room IDs, truncated device
+hashes and user agents; anyone who can read the check key can access it. `/stats` exposes counts and pairing mode without
+authentication, so an administrator must use the authenticated `/viewers` mode and resolved pairing-store path, and
+compare the path to its own store before unpairing. Shared mode alone does not establish store ownership.
+
+Disconnect closes a viewer with 4409 but does not revoke the cookie. Current locally built patched clients treat 4409 as
+terminal; the pinned 18.18 asset predates that patch and does not. Reloading reconnects a still-paired browser. Revocation
+is separate; in own mode use `omp-private-relay revoke`.
+
 ## Threats and what answers them
 
 | Threat | Answer | Residual |

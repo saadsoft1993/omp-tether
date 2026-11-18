@@ -337,6 +337,34 @@ describe("fresh install flows", () => {
 		expect(fs.readdirSync(path.join(home, ".local", "share", "omp-private-relay", "web")).sort()).toEqual([".current.install-lock", "current"]); // no scratch left
 	});
 
+	test("init preserves a verified local 18.19 rebuild but rejects a modified one", async () => {
+		const root = scratch();
+		const home = path.join(root, "home");
+		fs.mkdirSync(home, { mode: 0o700 });
+		const fake = writeFakeOmp(root, { version: "18.19.0" });
+		const env = { HOME: home, OMP_BIN: fake.bin, PATH: "/usr/bin:/bin" };
+		const web = path.join(home, ".local", "share", "omp-private-relay", "web", "current");
+		expect(await runCli(["rebuild-web", "--omp-src", root, "--tag", "v18.19.0"], env, io(), { buildScript: fakeBuild(root) })).toBe(0);
+		const record = path.join(web, ".omp-private-relay-build.json");
+		const meta = JSON.parse(fs.readFileSync(record, "utf8"));
+		expect(meta.asset).toBe("(built locally)");
+		expect(meta.localPatchVersion).toBe(1);
+		const oldMeta = { ...meta };
+		delete oldMeta.localPatchVersion;
+		fs.writeFileSync(record, JSON.stringify(oldMeta));
+		const old = io();
+		expect(await runCli(["init", "--yes"], env, old)).toBe(1);
+		expect(old.stdout).toContain("no prebuilt web client for omp 18.19");
+		fs.writeFileSync(record, JSON.stringify(meta));
+		const out = io();
+		expect(await runCli(["init", "--yes"], env, out)).toBe(0);
+		expect(out.stdout).toContain("locally built web client for omp 18.19");
+		fs.writeFileSync(path.join(web, "index.html"), "modified");
+		const modified = io();
+		expect(await runCli(["init", "--yes"], env, modified)).toBe(1);
+		expect(modified.stdout).toContain("no prebuilt web client for omp 18.19");
+	});
+
 	test("rebuild-web into a data directory that other accounts can write to is refused, and nothing is changed in it", async () => {
 		const root = scratch();
 		const home = path.join(root, "home");

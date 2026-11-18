@@ -142,6 +142,16 @@ describe("init", () => {
 		expect(out.stdout).toContain("(no answer: not done)");
 	}, 10_000);
 
+	test("--yes ignores a finite piped y for omp settings", async () => {
+		const { builds } = pinned();
+		const { fake, env } = setup();
+		const [host, guest] = await freePorts(2);
+		const input = Object.assign(io(["y"]), { interactive: false });
+		expect(await runCli(["init", "--yes", "--host-port", String(host), "--guest-port", String(guest), "--skip-web"], env, input, { builds })).toBe(0);
+		expect(input.stdout).toContain("(no answer: not done)");
+		expect(fake.calls().filter(c => c.includes("config set"))).toEqual([]);
+	});
+
 	test("without --yes, nothing is written until it is asked and answered yes; a no (or no answer) writes nothing at all", async () => {
 		const { builds } = pinned();
 		const { home, env } = setup();

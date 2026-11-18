@@ -19,6 +19,12 @@ make the relay listen on anything but `127.0.0.1`; a way to make `init`, `pair`,
 install a file that was not verified, or write outside its own directories; path handling flaws (symlinks, races,
 permissions) in the pairing store, the check key, the config file or the installed web client; anything that makes the relay
 crash or hang from the network side; secrets or personal data in the relay's output.
+The host-only `/viewers` and `/disconnect` endpoints require a nonce- and timestamp-bound HMAC using the private check
+key, and sign their responses; exposing viewer metadata or allowing a disconnect without that key is in scope.
+Disconnect sends close code 4409 but does not revoke pairing: a paired browser can reload and reconnect. Revoke the
+browser separately to remove access.
+The pinned 18.18 web asset predates the 4409 client patch, so it does not provide terminal 4409 handling. The current
+source patches include it; a local rebuild is not verified against a published pin and must use a trusted omp checkout.
 
 Out of scope, by design (see [`docs/threat-model.md`](docs/threat-model.md)): a process that already runs as your user or
 as root (it can read your pairing store and your sessions anyway); other accounts on the same machine opening rooms on the

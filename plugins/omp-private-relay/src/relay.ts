@@ -23,16 +23,17 @@
  * Both listeners bind 127.0.0.1 and nothing else: there is no setting that moves them.
  * Logs carry connection metadata only (listener, role, room prefix, peer, device prefix, close code).
  */
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createAuth, type GuestAuth } from "./auth";
 import type { Config } from "./config";
 import { ensurePrivateDir, readSmallFile, UID } from "./fsutil";
-import { CHECK_PREFIX } from "./listener-check";
-import { PairingError, PairingReader, PairingWriter } from "./pairing-store";
+import { CHECK_PREFIX, readCheckKey } from "./listener-check";
+import { DEVICES_FILE, PairingError, PairingReader, PairingWriter } from "./pairing-store";
 import { PAIR_JS, PAIR_PAGE } from "./pair-page";
 import { trustWalk } from "./trustwalk";
+import { inspectInstalled, LOCAL_BUILD_ASSET } from "./web-asset";
 
 /** The only address either listener ever binds. */
 export const LOOPBACK = "127.0.0.1";
@@ -59,6 +60,8 @@ interface SocketData {
 	peerId: number;
 	/** SHA-256 hex of the guest's pairing cookie; never the cookie itself. */
 	device: string;
+	connectedAt: number;
+	ua: string;
 	closing: boolean;
 }
 type RelaySocket = Bun.ServerWebSocket<SocketData>;
@@ -66,7 +69,6 @@ type RelaySocket = Bun.ServerWebSocket<SocketData>;
 interface Room {
 	host: RelaySocket;
 	guests: Map<number, RelaySocket>;
-	nextPeerId: number;
 }
 
 export interface RelayHandle {
@@ -83,6 +85,9 @@ export interface RelayOptions {
 
 type Gate = { ok: true; device: string } | { ok: false; status: number; reason: string };
 
+// Peer IDs are 32-bit on the wire. Never reuse one in this process, even after a room is recreated.
+let nextPeerId = 1;
+
 export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle {
 	const { limits } = config;
 	const startedAt = Date.now();
@@ -97,6 +102,8 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 	};
 	const rooms = new Map<string, Room>();
 	const sockets = new Set<RelaySocket>();
+	const lastAdmittedAt = new Map<string, number>();
+	const adminNonces = new Map<string, number>();
 	const write = opts.log ?? ((line: string) => console.log(line));
 
 	const log = (event: string, fields: Record<string, unknown> = {}): void => {
@@ -159,6 +166,20 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			web = { at: Date.now(), problem: walk.problem, root, dev, ino };
 		}
 		return web;
+	}
+
+	// Capability verification hashes the installed tree once per relay start. Installing or changing the web client
+	// requires a relay restart to refresh the advertised capability.
+	const startupWeb = webState();
+	const verifiedWeb = { root: startupWeb.problem ? null : startupWeb.root, dev: web.dev, ino: web.ino };
+	let verifiedViewers2 = false;
+	if (verifiedWeb.root !== null) {
+		try {
+			const installed = inspectInstalled(verifiedWeb.root);
+			verifiedViewers2 = installed.state === "ok" && installed.meta.asset === LOCAL_BUILD_ASSET && installed.meta.localPatchVersion === 1;
+		} catch {
+			// An unreadable or changing tree cannot prove support.
+		}
 	}
 
 	function buildCsp(html: string): string {
@@ -435,7 +456,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 				closeSocket(ws, CLOSE_FULL, "relay is full");
 				return;
 			}
-			rooms.set(roomId, { host: ws, guests: new Map(), nextPeerId: 1 });
+			rooms.set(roomId, { host: ws, guests: new Map() });
 			log("open", meta(ws));
 			return;
 		}
@@ -451,9 +472,18 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			closeSocket(ws, CLOSE_FULL, "room is full");
 			return;
 		}
-		const peerId = room.nextPeerId++;
+		if (nextPeerId > 0xffff_ffff) {
+			closeSocket(ws, CLOSE_FULL, "peer ids exhausted");
+			return;
+		}
+		const peerId = nextPeerId++;
 		ws.data.peerId = peerId;
 		room.guests.set(peerId, ws);
+		ws.data.connectedAt = Date.now();
+		const device8 = ws.data.device.slice(0, 8);
+		lastAdmittedAt.delete(device8);
+		lastAdmittedAt.set(device8, ws.data.connectedAt);
+		if (lastAdmittedAt.size > 10_000) lastAdmittedAt.delete(lastAdmittedAt.keys().next().value as string);
 		log("open", meta(ws));
 		send(room.host, JSON.stringify({ t: "peer-joined", peer: peerId }));
 	}
@@ -576,6 +606,58 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		return new Response(JSON.stringify({ body, mac }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 	}
 
+	// The host-side admin API authenticates each operation separately and never accepts a nonce twice.
+	function relayAdmin(req: Request, url: URL): Response {
+		if (req.headers.has("x-forwarded-host") || req.headers.has("tailscale-funnel-request")) return text(403, "forbidden");
+		const op = url.pathname === "/viewers" ? "viewers" : "disconnect";
+		if (req.method !== (op === "viewers" ? "GET" : "POST")) return text(405, "method not allowed");
+		const names = ["room", "peer", "device8", "nonce", "time", "mac"];
+		if (names.some(name => url.searchParams.getAll(name).length !== 1) || [...url.searchParams.keys()].some(name => !names.includes(name))) return text(400, "bad request");
+		const room = url.searchParams.get("room") as string;
+		const peer = url.searchParams.get("peer") as string;
+		const device8 = url.searchParams.get("device8") as string;
+		const nonce = url.searchParams.get("nonce") as string;
+		const time = url.searchParams.get("time") as string;
+		const mac = url.searchParams.get("mac") as string;
+		if (!/^[0-9a-f]{32}$/.test(nonce) || !/^(0|[1-9][0-9]*)$/.test(time) || !/^[0-9a-f]{64}$/.test(mac) ||
+			(op === "viewers" ? room !== "" || peer !== "" || device8 !== "" : !/^[A-Za-z0-9_-]{10,64}$/.test(room) || !/^[1-9][0-9]*$/.test(peer) || !Number.isSafeInteger(Number(peer)) || !/^[0-9a-f]{8}$/.test(device8))) return text(400, "bad request");
+		const now = Date.now();
+		const timestamp = Number(time);
+		if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > 30_000) return text(403, "forbidden");
+		const key = readCheckKey(config.checkDir);
+		if (!key.ok) return text(503, "admin unavailable");
+		const expected = createHmac("sha256", key.key).update(`relay-admin\n${op}\n${room}\n${peer}\n${device8}\n${nonce}\n${time}`).digest();
+		if (!timingSafeEqual(expected, Buffer.from(mac, "hex"))) return text(403, "forbidden");
+		for (const [used, expires] of adminNonces) if (expires <= now) adminNonces.delete(used);
+		if (adminNonces.has(nonce)) return text(403, "forbidden");
+		if (adminNonces.size >= 10_000) return text(503, "admin unavailable");
+		adminNonces.set(nonce, now + 120_001);
+		const json = (body: unknown, status = 200): Response => {
+			const bytes = Buffer.from(JSON.stringify(body), "utf8");
+			const digest = createHash("sha256").update(bytes).digest("hex");
+			const proof = createHmac("sha256", key.key).update(`relay-admin-resp\n${op}\n${nonce}\n${digest}`).digest("hex");
+			return new Response(bytes, { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Relay-Admin-Proof": proof } });
+		};
+		if (op === "viewers") {
+			const viewers = [];
+			for (const [roomId, active] of rooms) for (const [peerId, ws] of active.guests) {
+				if (!ws.data.closing) viewers.push({ room: roomId, peer: peerId, device8: ws.data.device.slice(0, 8), connectedAt: ws.data.connectedAt, ua: ws.data.ua });
+			}
+			let pairingStore: string | null = null;
+			try {
+				pairingStore = fs.realpathSync(path.join(config.pairing.dir, DEVICES_FILE));
+			} catch {
+				// An unresolved store cannot be used to authorize unpairing.
+			}
+			return json({ viewers, lastAdmittedAt: Object.fromEntries(lastAdmittedAt), pairingMode: pairingOwn ? "own" : "hub", pairingStore });
+		}
+		const ws = rooms.get(room)?.guests.get(Number(peer));
+		if (!ws || ws.data.closing) return json({ status: 404, error: "viewer already left" }, 404);
+		if (ws.data.device.slice(0, 8) !== device8) return json({ status: 409, error: "viewer changed" }, 409);
+		closeSocket(ws, 4409, "disconnected by host");
+		return json({ ok: true, device8 });
+	}
+
 	const serveOptions = {
 		hostname: LOOPBACK,
 		// A second relay must fail on a taken port, not share it (macOS would otherwise let two listeners bind the same port).
@@ -599,9 +681,13 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		} catch {
 			// not installed by init
 		}
+		const viewers2 = verifiedViewers2 && root !== null && root === verifiedWeb.root && web.dev === verifiedWeb.dev && web.ino === verifiedWeb.ino;
 		return JSON.stringify({
 			...stats,
 			adapter: auth.name,
+			pairingMode: pairingOwn ? "own" : "hub",
+			capabilities: viewers2 ? ["viewers2"] : [],
+			webClientNeedsRebuild: !viewers2,
 			rooms: rooms.size,
 			guests,
 			sockets: sockets.size,
@@ -609,7 +695,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			uptimeS: Math.round((Date.now() - startedAt) / 1000),
 			inRestartGrace: Date.now() - startedAt < limits.restartGraceMs,
 			staticReady: staticReady(),
-			build: build && typeof build === "object" ? { ompTag: (build as Record<string, unknown>).ompTag ?? null, bun: (build as Record<string, unknown>).bun ?? null } : null,
+			build: build && typeof build === "object" ? { ompTag: (build as Record<string, unknown>).ompTag ?? null, bun: (build as Record<string, unknown>).bun ?? null, localBuild: (build as Record<string, unknown>).asset === LOCAL_BUILD_ASSET, localPatchVersion: (build as Record<string, unknown>).localPatchVersion === 1 ? 1 : null } : null,
 			ready: auth.ready(),
 			limits: { ...limits },
 		});
@@ -640,11 +726,12 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			if (url.pathname === "/healthz") return text(200, "ok");
 			if (url.pathname === "/__relay_check") return relayCheck(req, url, config.listen.hostPort);
 			if (url.pathname === "/__relay_stats") return relayStats(req, url, config.listen.hostPort);
+			if (url.pathname === "/viewers" || url.pathname === "/disconnect") return relayAdmin(req, url);
 			if (url.pathname === "/stats") return new Response(statsBody(), { headers: { "Content-Type": "application/json" } });
 			const room = roomRequest(url);
 			if (!room) return text(404, "not found");
 			if (room.role !== "host") return text(403, "host listener: browsers use the guest listener");
-			const data: SocketData = { listener: "host", ...room, peerId: 0, device: "", closing: false };
+			const data: SocketData = { listener: "host", ...room, peerId: 0, device: "", connectedAt: 0, ua: "", closing: false };
 			if (!admit()) return text(503, "too many connections");
 			if (srv.upgrade(req, { data })) return undefined;
 			upgrading--;
@@ -663,6 +750,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		async fetch(req, srv) {
 			const url = new URL(req.url);
 			if (url.pathname === "/__relay_check") return relayCheck(req, url, config.listen.guestPort);
+			if (url.pathname === "/viewers" || url.pathname === "/disconnect") return text(404, "not found");
 			const upgrade = (req.headers.get("upgrade") ?? "").toLowerCase() === "websocket";
 			const gate = guestGate(req, upgrade, url.pathname);
 			if (!gate.ok) {
@@ -683,7 +771,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			const room = roomRequest(url);
 			if (!room) return text(404, "not found");
 			if (room.role !== "guest") return text(403, "guest listener: hosts use the loopback listener");
-			const data: SocketData = { listener: "guest", ...room, peerId: 0, device: gate.device, closing: false };
+			const data: SocketData = { listener: "guest", ...room, peerId: 0, device: gate.device, connectedAt: 0, ua: (req.headers.get("user-agent") ?? "").replace(/[^\x20-\x7e]/g, "").slice(0, 120), closing: false };
 			if (!admit()) return text(503, "too many connections");
 			if (srv.upgrade(req, { data })) return undefined;
 			upgrading--;

@@ -167,7 +167,8 @@ describe("tailscale-serve adapter", () => {
 		const g = guestPeer(relay, room);
 		expect(await g.opened).toBe(true);
 		await waitUntil(() => h.control.length === 1, 2000);
-		expect(JSON.parse(h.control[0] as string)).toEqual({ t: "peer-joined", peer: 1 });
+		const peerId = JSON.parse(h.control[0] as string).peer;
+		expect(peerId).toBeGreaterThan(0);
 		const second = hostPeer(relay, room);
 		expect((await closedWithin(second, 3000))?.code).toBe(4009);
 		const missing = guestPeer(relay, makeRoomId("none"));
@@ -179,9 +180,9 @@ describe("tailscale-serve adapter", () => {
 		};
 		g.ws.send(frame(77, 64));
 		const fromGuest = await got.promise;
-		expect(new DataView(fromGuest.buffer).getUint32(0)).toBe(1);
+		expect(new DataView(fromGuest.buffer).getUint32(0)).toBe(peerId);
 		// host -> guest, then host leaves
-		h.ws.send(frame(1, 128));
+		h.ws.send(frame(peerId, 128));
 		await waitUntil(() => g.received === 1, 2000);
 		expect(g.receivedBytes).toBe(128);
 		h.ws.close();
