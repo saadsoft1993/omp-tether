@@ -160,6 +160,64 @@ describe("operations", () => {
 		expect(host.messages).toEqual(["slow"]);
 	});
 
+	test("send starts only after an earlier mutation settles", async () => {
+		const gate = Promise.withResolvers<void>();
+		const order: string[] = [];
+		host.pi.setSessionName = async () => { order.push("rename"); await gate.promise; };
+		host.pi.sendUserMessage = async () => { order.push("send"); };
+		c.send([frame(31, "rename", { name: "x" }), frame(32, "send-message", { text: "hello", messageId: "ordered" })].map(JSON.stringify).join("\n"));
+		await host.waitFor(() => order.length > 0, "rename started");
+		expect(order).toEqual(["rename"]);
+		gate.resolve();
+		await c.next(); await c.next();
+		expect(order).toEqual(["rename", "send"]);
+	});
+
+	test("model mention rewritten by omp confirms admission before the turn ends", async () => {
+		Object.assign(host.ctx.sessionManager, { getBranch: () => [{ type: "custom", customType: "model_mention", data: { agent: "m1", selector: "anthropic/model", name: "Model" } }] });
+		host.pi.sendUserMessage = (text: string) => { host.messages.push(text); return Promise.withResolvers<void>().promise; };
+		const pending = c.request(frame(1, "send-message", { text: "Ask ^anthropic/model now", messageId: "mention" }));
+		await host.waitFor(() => host.messages.length === 1, "send started");
+		await host.emit("message_start", { message: { role: "user", content: [{ type: "text", text: 'Ask <model agent="m1" name="Model"/> now' }] } });
+		expect((await pending).result).toEqual({ state: "admitted" });
+	});
+
+	for (const [submitted, canonical] of [["anthropic/model:auto", "anthropic/model"], ["anthropic/model:med", "anthropic/model:medium"]]) {
+		test(`model selector ${submitted} admits after canonicalization`, async () => {
+			host.ctx.models = { list: () => [{ provider: "anthropic", id: "model" }], current: () => undefined, resolve: () => undefined };
+			Object.assign(host.ctx.sessionManager, { getBranch: () => [{ type: "custom", customType: "model_mention", data: { agent: "m1", selector: canonical, name: "Model" } }] });
+			host.pi.sendUserMessage = (text: string) => { host.messages.push(text); return Promise.withResolvers<void>().promise; };
+			const pending = c.request(frame(1, "send-message", { text: `Ask ^${submitted} now`, messageId: "alias" }));
+			await host.waitFor(() => host.messages.length === 1, "send started");
+			await host.emit("message_start", { message: { role: "user", content: [{ type: "text", text: 'Ask <model agent="m1" name="Model"/> now' }] } });
+			expect((await pending).result).toEqual({ state: "admitted" });
+		});
+	}
+
+	test("a literal model tag is preserved while a mention expands", async () => {
+		Object.assign(host.ctx.sessionManager, { getBranch: () => [{ type: "custom", customType: "model_mention", data: { agent: "m1", selector: "anthropic/model", name: "Model" } }] });
+		host.pi.sendUserMessage = (text: string) => { host.messages.push(text); return Promise.withResolvers<void>().promise; };
+		const tag = '<model agent="m1" name="Model"/>';
+		const pending = c.request(frame(1, "send-message", { text: `Show ${tag} and ask ^anthropic/model now`, messageId: "literal" }));
+		await host.waitFor(() => host.messages.length === 1, "send started");
+		await host.emit("message_start", { message: { role: "user", content: [{ type: "text", text: `Show ${tag} and ask ${tag} now` }] } });
+		expect((await pending).result).toEqual({ state: "admitted" });
+	});
+
+	test("exact model IDs do not match an abbreviated selector for a different model", async () => {
+		host.ctx.models = { list: () => [{ provider: "anthropic", id: "model:ma" }, { provider: "anthropic", id: "model:max" }], current: () => undefined, resolve: () => undefined };
+		Object.assign(host.ctx.sessionManager, { getBranch: () => [{ type: "custom", customType: "model_mention", data: { agent: "m1", selector: "anthropic/model:max", name: "Model" } }] });
+		host.pi.sendUserMessage = (text: string) => { host.messages.push(text); return Promise.withResolvers<void>().promise; };
+		let settled = false;
+		const pending = c.request(frame(1, "send-message", { text: "Ask ^anthropic/model:ma now", messageId: "exact" })).then(result => { settled = true; return result; });
+		await host.waitFor(() => host.messages.length === 1, "send started");
+		await host.emit("message_start", { message: { role: "user", content: [{ type: "text", text: 'Ask <model agent="m1" name="Model"/> now' }] } });
+		await new Promise(resolve => setTimeout(resolve, 20));
+		expect(settled).toBe(false);
+		await host.emit("message_start", { message: { role: "user", content: [{ type: "text", text: "Ask ^anthropic/model:ma now" }] } });
+		expect((await pending).result).toEqual({ state: "admitted" });
+	});
+
 	test("abort interrupts a busy session once and reports an idle one as not aborted", async () => {
 		host.busy = true;
 		expect((await c.request(frame(1, "abort"))).result).toEqual({ aborted: true });

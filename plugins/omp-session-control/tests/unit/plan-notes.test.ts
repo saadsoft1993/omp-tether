@@ -218,3 +218,12 @@ test("notes send rejection reports failure", async () => {
 	await new Promise(resolve => setTimeout(resolve, 10));
 	expect((await info()).planNotes).toMatchObject({ state: "failed", reason: "omp did not accept the message" });
 });
+
+
+test("ordinary plan-answer cannot bypass a pending same-path approval", async () => {
+	const first = await host.openReview();
+	await call("plan-notes", { reviewId: first.reviewId, choice: "keep", notes: "private", requestId: "protected" });
+	const second = await host.openReview();
+	expect((await call("plan-answer", { reviewId: second.reviewId, choice: "keep" })).code).toBe("busy");
+	expect(host.resolveCalls).toHaveLength(1);
+});

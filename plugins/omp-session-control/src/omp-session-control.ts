@@ -1011,10 +1011,10 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	const pruneMessages = (): void => {
 		for (const [id, entry] of deliveredMessages) if (Date.now() - entry.at >= 15 * 60_000) deliveredMessages.delete(id);
 	};
-	const sendMessage = async (c: ExtensionContext, args: Record<string, unknown>, answering = false): Promise<Delivery & { duplicate?: boolean }> => {
+	const sendMessage = async (c: ExtensionContext, args: Record<string, unknown>, answering = false, internal = false): Promise<Delivery & { duplicate?: boolean }> => {
 		const { text, messageId } = args;
 		if (typeof text !== "string" || !text.trim() || text.length > 8000) throw new ControlError("invalid_args", "text must contain 1 to 8000 characters");
-		if (typeof messageId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(messageId)) throw new ControlError("invalid_args", "invalid messageId");
+		if (typeof messageId !== "string" || !(internal ? /^~plan-[a-f0-9]{64}$/.test(messageId) : /^[A-Za-z0-9_-]{1,128}$/.test(messageId))) throw new ControlError("invalid_args", "invalid messageId");
 		const askId = answering ? args.askId : undefined;
 		if (answering && (typeof askId !== "string" || !askId)) throw new ControlError("invalid_args", "invalid askId");
 		pruneMessages();
@@ -1190,6 +1190,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		if (role !== undefined) input.role = role as string;
 		const path = review.planFilePath;
 		const approval = Object.hasOwn(APPROVALS, choice);
+		if (approval && pendingApprovals.has(path)) throw new ControlError("busy", "another approval of this plan is still starting");
 		const token = approval ? Symbol() : undefined;
 		if (token) {
 			const pending = pendingApprovals.get(path) ?? new Set<symbol>();
@@ -1286,12 +1287,12 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		if (off() || stopped || listenerEpoch !== item.epoch) return failPlanNotes("control disabled");
 		item.delivering = true;
 		if (item.timer !== undefined) c.clearTimer(item.timer);
-		const messageId = `plan-${crypto.createHash("sha256").update(item.requestId).digest("hex")}`;
+		const messageId = `~plan-${crypto.createHash("sha256").update(item.requestId).digest("hex")}`;
 		void guardedAsync("plan_notes", async () => {
 			try {
 				if (item.state !== "pending" || off() || stopped || listenerEpoch !== item.epoch) throw new ControlError("disabled", "control disabled");
 				if (currentSessionId() !== item.promptSessionId || replacing || hostMutationRunning || isCompacting()) throw new ControlError("changed", "the session changed or is busy");
-				const result = await sendMessage(requireCtx(), { text: item.notes, messageId });
+				const result = await sendMessage(requireCtx(), { text: item.notes, messageId }, false, true);
 				if (item.state !== "pending") return;
 				if (result.state === "admitted") item.state = "sent";
 				else if (result.state === "pending") {
@@ -1637,7 +1638,9 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				client.pending -= 1;
 			}
 		};
-		if (MUTATING[req.op] && req.op !== "send-message" && req.op !== "ask-answer") mutationChain = mutationChain.then(() => guardedAsync("mutation", execute));
+		if (req.op === "send-message" || req.op === "ask-answer") {
+			mutationChain = mutationChain.then(() => { void guardedAsync("mutation", execute); });
+		} else if (MUTATING[req.op]) mutationChain = mutationChain.then(() => guardedAsync("mutation", execute));
 		else void guardedAsync("op", execute);
 	};
 
@@ -2031,8 +2034,42 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		const content = "content" in message && Array.isArray(message.content) ? message.content : [];
 		const text = content.map((part: { type?: unknown; text?: unknown }) => part?.type === "text" && typeof part.text === "string" ? part.text : "").join("");
 		if (role === "user") {
+			const manager = c.sessionManager as unknown as { getBranch?: () => unknown };
+			const branch = text.includes('<model agent="') ? manager.getBranch?.() : undefined;
+			const tags = new Map<string, string>();
+			if (Array.isArray(branch)) {
+				for (const value of branch) {
+					if (!value || typeof value !== "object" || value.type !== "custom" || value.customType !== "model_mention") continue;
+					const data = value.data;
+					if (data && typeof data === "object" && typeof data.agent === "string" && typeof data.selector === "string" && typeof data.name === "string") {
+						tags.set(data.selector, `<model agent="${data.agent}" name="${data.name}"/>`);
+					}
+				}
+			}
+			const models = availableModels(c);
+			const exact = new Set(models.flatMap(model => {
+				if (!model || typeof model !== "object" || !("provider" in model) || !("id" in model) || typeof model.provider !== "string" || typeof model.id !== "string") return [];
+				return [`${model.provider}/${model.id}`];
+			}));
 			for (const entry of deliveredMessages.values()) {
-				if (entry.result.state === "pending" && entry.text === text) {
+				if (entry.result.state !== "pending") continue;
+				const expanded = entry.text.replace(/(^|\s)\^([^\s^]+)(?=\s|$)/g, (token, delimiter: string, selector: string) => {
+					let canonical = selector;
+					if (models.length > 0 && !exact.has(selector) && !tags.has(selector)) {
+						const colon = selector.lastIndexOf(":");
+						if (colon > 0) {
+							const base = selector.slice(0, colon);
+							const suffix = selector.slice(colon + 1);
+							const efforts = ["minimal", "low", "medium", "high", "xhigh", "max"];
+							const matches = efforts.filter(effort => effort.startsWith(suffix));
+							if (suffix === "auto") canonical = base;
+							else if (suffix.length >= 2 && matches.length === 1 && exact.has(base) && !exact.has(`${base}:${matches[0]}`)) canonical = `${base}:${matches[0]}`;
+						}
+					}
+					const tag = tags.get(canonical);
+					return tag ? `${delimiter}${tag}` : token;
+				});
+				if (entry.text === text || expanded === text) {
 					entry.result = { state: "admitted" };
 					entry.admit();
 					break;
