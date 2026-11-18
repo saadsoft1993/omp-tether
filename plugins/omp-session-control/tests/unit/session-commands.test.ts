@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Client } from "./support/client";
 import { FakeHost, type FakeModel, type HostOptions, MODEL_A, MODEL_B, MODEL_C } from "./support/fake-host";
 
-const BASE_OPS = ["snapshot", "abort", "rename", "send-message", "ask-review", "ask-answer"];
+const BASE_OPS = ["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer"];
 const ALL_OPS = [...BASE_OPS, "session-info", "compact", "set-model", "set-thinking", "set-mode"];
 
 let host: FakeHost;

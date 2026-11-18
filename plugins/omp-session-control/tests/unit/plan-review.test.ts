@@ -47,10 +47,10 @@ describe("capability", () => {
 	beforeEach(() => boot());
 
 	test("the registry and the snapshot list the plan operations when the host has both methods", async () => {
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "send-message", "ask-review", "ask-answer", "plan-review", "plan-answer"]);
+		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer", "plan-review", "plan-answer"]);
 		expect(host.registry()?.data.planReview).toBeNull();
 		expect((await c.request({ v: 1, id: 1, nonce, op: "snapshot" })).result).toMatchObject({
-			ops: ["snapshot", "abort", "rename", "send-message", "ask-review", "ask-answer", "plan-review", "plan-answer"],
+			ops: ["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer", "plan-review", "plan-answer"],
 		});
 	});
 
@@ -63,11 +63,11 @@ describe("a host without the methods (an older omp)", () => {
 	beforeEach(() => boot({ planReview: false }));
 
 	test("the plan operations are not offered and are unknown", async () => {
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "send-message", "ask-review", "ask-answer"]);
+		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer"]);
 		expect(host.registry()?.data.planReview).toBeNull();
 		expect((await c.request(frame("plan-review", { offset: 0 }))).code).toBe("unknown_op");
 		expect((await c.request(frame("plan-answer", { reviewId: "x", choice: "execute" }))).code).toBe("unknown_op");
-		expect((await c.request({ v: 1, id: 1, nonce, op: "snapshot" })).result).toMatchObject({ ops: ["snapshot", "abort", "rename", "send-message", "ask-review", "ask-answer"] });
+		expect((await c.request({ v: 1, id: 1, nonce, op: "snapshot" })).result).toMatchObject({ ops: ["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer"] });
 	});
 
 	test("review events are ignored", async () => {

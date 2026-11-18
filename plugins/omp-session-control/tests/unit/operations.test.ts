@@ -13,6 +13,7 @@ let generation: number;
 
 beforeEach(async () => {
 	host = await FakeHost.start({ enable: true, env: { OMP_SESSION_CONTROL_IDLE_MS: "600" } });
+	host.pi.sendUserMessage = async (text: string) => { host.messages.push(text); host.busy = true; };
 	await host.fire("session_start");
 	({ client: c, nonce, sessionId, generation } = await Client.toHost(host));
 });
@@ -40,16 +41,16 @@ describe("operations", () => {
 				pid: process.pid,
 				protocol: 1,
 				protocols: [1],
-				ops: ["snapshot", "abort", "rename", "send-message", "ask-review", "ask-answer"],
+				ops: ["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer"],
 				plugin: { name: "omp-session-control", version: "0.4.0" },
 			},
 		});
 	});
 
 	test("messages settle on admission, queue while busy, and do not block stop", async () => {
-		expect((await c.request(frame(1, "send-message", { text: "first", messageId: "first" }))).result).toEqual({ accepted: true, delivery: "started" });
-		expect((await c.request(frame(2, "send-message", { text: "second", messageId: "second" }))).result).toEqual({ accepted: true, delivery: "queued" });
-		expect((await c.request(frame(3, "send-message", { text: "first", messageId: "first" }))).result).toEqual({ accepted: true, delivery: "started", duplicate: true });
+		expect((await c.request(frame(1, "send-message", { text: "first", messageId: "first" }))).result).toEqual({ state: "admitted" });
+		expect((await c.request(frame(2, "send-message", { text: "second", messageId: "second" }))).result).toEqual({ state: "admitted" });
+		expect((await c.request(frame(3, "send-message", { text: "first", messageId: "first" }))).result).toEqual({ state: "admitted", duplicate: true });
 		expect((await c.request(frame(4, "abort"))).result).toEqual({ aborted: true });
 		expect(host.messages).toEqual(["first", "second"]);
 	});
@@ -62,7 +63,7 @@ describe("operations", () => {
 		expect((await c.request(frame(3, "ask-answer", { askId: "ask-1", text: "answer", messageId: "m" }))).ok).toBe(true);
 		await host.emit("tool_execution_end", { toolName: "ask", toolCallId: "ask-1" });
 		expect((await c.request(frame(4, "ask-review"))).result).toEqual({ open: false });
-		expect((await c.request(frame(5, "ask-answer", { askId: "ask-1", text: "answer", messageId: "m" }))).result).toEqual({ accepted: true, delivery: "started", duplicate: true });
+		expect((await c.request(frame(5, "ask-answer", { askId: "ask-1", text: "answer", messageId: "m" }))).result).toEqual({ state: "admitted", duplicate: true });
 		expect((await c.request(frame(6, "ask-answer", { askId: "different", text: "answer", messageId: "m" }))).code).toBe("invalid_args");
 		expect((await c.request(frame(7, "send-message", { text: "answer", messageId: "m" }))).code).toBe("invalid_args");
 		expect(host.messages).toEqual(["answer"]);
@@ -78,9 +79,9 @@ describe("operations", () => {
 				expect((await c.request(frame(i, "send-message", { text: `m${i}`, messageId: `m${i}` }))).ok).toBe(true);
 				now++;
 			}
-			expect((await c.request(frame("old", "send-message", { text: "again", messageId: "m0" }))).result).toEqual({ accepted: true, delivery: "started" });
+			expect((await c.request(frame("old", "send-message", { text: "again", messageId: "m0" }))).result).toEqual({ state: "admitted" });
 			now += 15 * 60_000;
-			expect((await c.request(frame("ttl", "send-message", { text: "expired", messageId: "m256" }))).result).toEqual({ accepted: true, delivery: "started" });
+			expect((await c.request(frame("ttl", "send-message", { text: "expired", messageId: "m256" }))).result).toEqual({ state: "admitted" });
 			expect(host.messages.length).toBe(259);
 		} finally {
 			Date.now = realNow;
@@ -94,7 +95,7 @@ describe("operations", () => {
 		await host.fire("session_switch");
 		const reg = host.registry()!.data;
 		const reply = await c.request({ ...frame(2, "send-message", { text: "second", messageId: "same" }), sessionId: host.sessionId, generation: reg.generation });
-		expect(reply.result).toEqual({ accepted: true, delivery: "started" });
+		expect(reply.result).toEqual({ state: "admitted" });
 		expect(host.messages).toEqual(["first", "second"]);
 	});
 
@@ -107,7 +108,7 @@ describe("operations", () => {
 		try {
 			await c.request(frame(1, "send-message", { text: "one", messageId: "same" }));
 			const response = await peer.client.request({ v: 1, id: 2, nonce: peer.nonce, sessionId: peer.sessionId, generation: peer.generation, op: "send-message", args: { text: "two", messageId: "same" } });
-			expect(response.result).toEqual({ accepted: true, delivery: "started" });
+			expect(response.result).toEqual({ state: "admitted" });
 			expect(other.messages).toEqual(["two"]);
 		} finally {
 			peer.client.close();
@@ -129,17 +130,34 @@ describe("operations", () => {
 		expect((await c.request(frame(1, "ask-review"))).result).toEqual({ open: true, askId: "new", questions });
 	});
 
-	test("a quick send rejection is reported and the id can be retried", async () => {
+	test("failed receipts are retained and unknown status never sends", async () => {
 		host.pi.sendUserMessage = async () => { throw new Error("failed"); };
-		expect((await c.request(frame(1, "send-message", { text: "hello", messageId: "retry" }))).ok).toBe(false);
-		host.pi.sendUserMessage = async () => {};
-		expect((await c.request(frame(2, "send-message", { text: "hello", messageId: "retry" }))).result).toEqual({ accepted: true, delivery: "started" });
+		expect((await c.request(frame(1, "send-message", { text: "hello", messageId: "retry" }))).result).toEqual({ state: "failed", reason: "omp did not accept the message" });
+		expect((await c.request(frame(2, "send-status", { messageId: "retry" }))).result).toEqual({ state: "failed", reason: "omp did not accept the message" });
+		expect((await c.request(frame(3, "send-status", { messageId: "unknown" }))).result).toEqual({ state: "unknown" });
+		expect(host.messages).toEqual([]);
 	});
 
-	test("a void-returning omp 18.18 host admits messages", async () => {
+	test("void send waits for matching message admission", async () => {
 		host.pi.sendUserMessage = (text: string) => { host.messages.push(text); };
-		expect((await c.request(frame(1, "send-message", { text: "hello", messageId: "void-host" }))).result).toEqual({ accepted: true, delivery: "started" });
-		expect(host.messages).toEqual(["hello"]);
+		const pending = c.request(frame(1, "send-message", { text: "hello", messageId: "void-host" }));
+		await host.waitFor(() => host.messages.length === 1, "send started");
+		await host.emit("message_start", { message: { role: "user", content: [{ type: "text", text: "hello" }] } });
+		expect((await pending).result).toEqual({ state: "admitted" });
+	});
+
+	test("pending delivery later fails without resending and does not block abort", async () => {
+		const gate = Promise.withResolvers<void>();
+		const original = host.ctx.setTimeout;
+		host.ctx.setTimeout = (cb, ms) => original(cb, ms === 5000 ? 20 : ms);
+		host.pi.sendUserMessage = (text: string) => { host.messages.push(text); host.busy = true; return gate.promise; };
+		expect((await c.request(frame(1, "send-message", { text: "slow", messageId: "slow" }))).result).toEqual({ state: "pending" });
+		expect((await c.request(frame(2, "send-status", { messageId: "slow" }))).result).toEqual({ state: "pending" });
+		expect((await c.request(frame(3, "abort"))).result).toEqual({ aborted: true });
+		gate.reject(new Error("no credentials"));
+		await new Promise(resolve => setTimeout(resolve, 10));
+		expect((await c.request(frame(4, "send-message", { text: "slow", messageId: "slow" }))).result).toEqual({ state: "failed", reason: "omp did not accept the message", duplicate: true });
+		expect(host.messages).toEqual(["slow"]);
 	});
 
 	test("abort interrupts a busy session once and reports an idle one as not aborted", async () => {

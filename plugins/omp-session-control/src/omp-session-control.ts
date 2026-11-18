@@ -28,7 +28,7 @@ export const PLUGIN_VERSION = "0.4.0";
 /** Wire protocol versions this build speaks (docs/protocol/control-1.md). */
 export const PROTOCOL_VERSIONS: readonly number[] = [1];
 const PROTOCOL_VERSION = 1;
-export const OPS = ["snapshot", "abort", "rename", "send-message", "ask-review", "ask-answer"] as const;
+export const OPS = ["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer"] as const;
 /** Offered only when the host has ctx.getPendingPlanReview and ctx.resolvePlanReview (feature-detected). */
 export const PLAN_OPS = ["plan-review", "plan-answer"] as const;
 /**
@@ -83,6 +83,7 @@ const MUTATING: Readonly<Record<string, boolean>> = {
 	abort: true,
 	rename: true,
 	"send-message": true,
+	"send-status": false,
 	"ask-review": false,
 	"ask-answer": true,
 	"plan-review": false,
@@ -99,6 +100,7 @@ const TARGET_CHECKED: Readonly<Record<string, true>> = {
 	abort: true,
 	rename: true,
 	"send-message": true,
+	"send-status": true,
 	"ask-review": true,
 	"ask-answer": true,
 	"plan-review": true,
@@ -739,9 +741,10 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	/** The open plan review, as far as this plugin knows; the host's getPendingPlanReview is the authority (see reconcilePlan). */
 	let planReview: PlanReview | undefined;
 	let askReview: { askId: string; openedAt: string; args: Record<string, unknown>; tooLarge: boolean } | undefined;
-	const deliveredMessages = new Map<string, { at: number; askId?: string; result: { accepted: true; delivery: "started" | "queued" } }>();
+	type Delivery = { state: "pending" | "admitted" | "failed"; reason?: string };
+	const deliveredMessages = new Map<string, { at: number; askId?: string; text: string; result: Delivery; admit: () => void }>();
 	const pendingApprovals = new Map<string, Set<symbol>>();
-	type PlanNotesState = { requestId: string; reviewId: string; choice: string; approved: boolean; path: string; notes: string; state: "pending" | "sent" | "failed"; at: string; reason?: string; timer?: Timer; promptSessionId?: string; delivering?: boolean; expectedSessionId: string; switches: number; expectFirst: boolean; epoch: number; approvalToken?: symbol };
+	type PlanNotesState = { requestId: string; reviewId: string; choice: string; approved: boolean; path: string; notes: string; state: "pending" | "sent" | "failed" | "uncertain"; at: string; reason?: string; timer?: Timer; promptSessionId?: string; delivering?: boolean; expectedSessionId: string; switches: number; expectFirst: boolean; epoch: number; approvalToken?: symbol };
 	let planNotes: PlanNotesState | undefined;
 	const planNotesReceipts = new Map<string, PlanNotesState>();
 	const failPlanNotes = (reason: string): void => {
@@ -1005,41 +1008,49 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		if (req.sessionId !== live.sessionId) throw new ControlError("stale_session", "sessionId does not match the live session", live);
 		if (req.generation !== generation) throw new ControlError("stale_generation", "generation does not match", live);
 	};
-	const sendMessage = async (c: ExtensionContext, args: Record<string, unknown>, answering = false): Promise<unknown> => {
+	const pruneMessages = (): void => {
+		for (const [id, entry] of deliveredMessages) if (Date.now() - entry.at >= 15 * 60_000) deliveredMessages.delete(id);
+	};
+	const sendMessage = async (c: ExtensionContext, args: Record<string, unknown>, answering = false): Promise<Delivery & { duplicate?: boolean }> => {
 		const { text, messageId } = args;
 		if (typeof text !== "string" || !text.trim() || text.length > 8000) throw new ControlError("invalid_args", "text must contain 1 to 8000 characters");
 		if (typeof messageId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(messageId)) throw new ControlError("invalid_args", "invalid messageId");
 		const askId = answering ? args.askId : undefined;
 		if (answering && (typeof askId !== "string" || !askId)) throw new ControlError("invalid_args", "invalid askId");
-		const now = Date.now();
-		for (const [id, entry] of deliveredMessages) if (now - entry.at >= 15 * 60_000) deliveredMessages.delete(id);
+		pruneMessages();
 		const previous = deliveredMessages.get(messageId);
 		if (previous) {
-			if (previous.askId !== askId) throw new ControlError("invalid_args", "messageId belongs to another operation");
+			if (previous.askId !== askId || previous.text !== text) throw new ControlError("invalid_args", "messageId belongs to another message");
 			return { ...previous.result, duplicate: true };
 		}
 		if (answering && (!askReview || askReview.askId !== askId)) throw new ControlError("changed", "the question changed");
-		const result = { accepted: true as const, delivery: c.isIdle() ? "started" as const : "queued" as const };
-		let pending: Promise<void>;
-		try {
-			pending = Promise.resolve(pi.sendUserMessage(text));
-		} catch {
-			throw new ControlError("failed", "omp did not accept the message");
-		}
-		deliveredMessages.set(messageId, { at: now, ...(typeof askId === "string" ? { askId } : {}), result });
+		const admitted = Promise.withResolvers<void>();
+		const entry = { at: Date.now(), ...(typeof askId === "string" ? { askId } : {}), text, result: { state: "pending" } as Delivery, admit: admitted.resolve };
+		deliveredMessages.set(messageId, entry);
 		if (deliveredMessages.size > 256) deliveredMessages.delete(deliveredMessages.keys().next().value as string);
-		const { promise, resolve } = Promise.withResolvers<void>();
-		const timer = c.setTimeout(resolve, 250);
+		let returned: unknown;
 		try {
-			await Promise.race([pending, promise]);
+			returned = pi.sendUserMessage(text);
 		} catch {
-			deliveredMessages.delete(messageId);
-			throw new ControlError("failed", "omp did not accept the message");
-		} finally {
-			c.clearTimer(timer);
+			entry.result = { state: "failed", reason: "omp did not accept the message" };
+			return entry.result;
 		}
-		void pending.catch(() => {});
-		return result;
+		let settle: Promise<void> | undefined;
+		if (returned && typeof returned === "object" && "then" in returned && typeof returned.then === "function") {
+			settle = guardedAsync("message_admission", async () => {
+				try {
+					await returned;
+					if (entry.result.state === "pending") entry.result = { state: "admitted" };
+				} catch {
+					if (entry.result.state === "pending") entry.result = { state: "failed", reason: "omp did not accept the message" };
+				}
+			});
+		}
+		const deadline = Promise.withResolvers<void>();
+		const timer = c.setTimeout(deadline.resolve, 5000);
+		await Promise.race(settle ? [settle, admitted.promise, deadline.promise] : [admitted.promise, deadline.promise]);
+		c.clearTimer(timer);
+		return { ...entry.result };
 	};
 
 
@@ -1056,6 +1067,12 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				return sendMessage(c, req.args, true);
 			case "send-message":
 				return sendMessage(c, req.args);
+			case "send-status": {
+				const id = req.args.messageId;
+				if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new ControlError("invalid_args", "invalid messageId");
+				pruneMessages();
+				return deliveredMessages.get(id)?.result ?? { state: "unknown" };
+			}
 			case "plan-notes":
 				return startPlanNotes(c, req.args);
 			case "abort": {
@@ -1228,21 +1245,25 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			if (previous.reviewId !== reviewId || previous.choice !== choice) throw new ControlError("invalid_args", "requestId belongs to another approval");
 			return { approved: previous.approved, requestId, notes: previous.state, ...(previous.reason ? { reason: previous.reason } : {}), duplicate: true };
 		}
-		if (planNotes?.state === "pending") throw new ControlError("busy", "another plan notes request is pending");
 		syncPlan(c);
 		const review = planReview;
 		if (!review || review.reviewId !== reviewId) throw new ControlError("changed", "the plan review changed");
 		if (!review.planFilePath) throw new ControlError("changed", "the plan has no path");
-		const item: PlanNotesState = { requestId, reviewId, choice, approved: false, path: review.planFilePath, notes, state: "pending", at: new Date().toISOString(), expectedSessionId: currentSessionId(), switches: 0, expectFirst: false, epoch: listenerEpoch };
-		planNotes = item;
+		const item: PlanNotesState = { requestId, reviewId, choice, approved: false, path: review.planFilePath, notes, state: "pending", at: new Date().toISOString(), expectedSessionId: currentSessionId(), switches: 0, expectFirst: choice !== "execute", epoch: listenerEpoch };
 		planNotesReceipts.set(requestId, item);
 		if (planNotesReceipts.size > 256) planNotesReceipts.delete(planNotesReceipts.keys().next().value as string);
 		if (pendingApprovals.has(item.path)) {
 			item.state = "failed";
 			item.reason = "another approval of this plan is still starting";
+			if (!planNotes || planNotes.state !== "pending") planNotes = item;
 			item.notes = "";
 			return { approved: false, requestId, notes: "failed", reason: item.reason };
 		}
+		if (planNotes?.state === "pending") {
+			planNotesReceipts.delete(requestId);
+			throw new ControlError("busy", "another plan notes request is pending");
+		}
+		planNotes = item;
 		try {
 			answerPlan(c, { reviewId, choice, ...(args.role === undefined ? {} : { role: args.role }) });
 			item.approved = true;
@@ -1253,11 +1274,9 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		}
 		item.timer = c.setTimeout(() => {
 			if (item.state !== "pending") return;
-			item.state = "failed";
-			item.reason = "plan did not start within 5 minutes";
-			item.at = new Date().toISOString();
-			item.notes = "";
-		}, 300_000);
+			failPlanNotes("the plan did not start; compaction was cancelled");
+			if (item.approvalToken) removePendingApproval(item.path, item.approvalToken);
+		}, 30 * 60_000);
 		return { approved: true, requestId, notes: "pending" };
 	};
 
@@ -1268,22 +1287,30 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		item.delivering = true;
 		if (item.timer !== undefined) c.clearTimer(item.timer);
 		const messageId = `plan-${crypto.createHash("sha256").update(item.requestId).digest("hex")}`;
-		mutationChain = mutationChain.then(() => guardedAsync("plan_notes", async () => {
+		void guardedAsync("plan_notes", async () => {
 			try {
 				if (item.state !== "pending" || off() || stopped || listenerEpoch !== item.epoch) throw new ControlError("disabled", "control disabled");
 				if (currentSessionId() !== item.promptSessionId || replacing || hostMutationRunning || isCompacting()) throw new ControlError("changed", "the session changed or is busy");
-				await sendMessage(requireCtx(), { text: item.notes, messageId });
-				item.state = "sent";
-			} catch {
+				const result = await sendMessage(requireCtx(), { text: item.notes, messageId });
+				if (item.state !== "pending") return;
+				if (result.state === "admitted") item.state = "sent";
+				else if (result.state === "pending") {
+					item.state = "uncertain";
+					item.reason = "notes may not have been delivered; check the session";
+				} else {
+					item.state = "failed";
+					item.reason = result.reason;
+				}
+			} catch (error) {
 				if (item.state === "pending") {
 					item.state = "failed";
-					item.reason = off() || stopped || listenerEpoch !== item.epoch ? "control disabled" : "notes could not be sent";
+					item.reason = off() || stopped || listenerEpoch !== item.epoch ? "control disabled" : error instanceof Error ? error.message : "notes could not be sent";
 				}
 			} finally {
 				item.at = new Date().toISOString();
 				item.notes = "";
 			}
-		}));
+		});
 	};
 
 	// -- session commands ---------------------------------------------------------------------------------------------
@@ -1610,7 +1637,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				client.pending -= 1;
 			}
 		};
-		if (MUTATING[req.op]) mutationChain = mutationChain.then(() => guardedAsync("mutation", execute));
+		if (MUTATING[req.op] && req.op !== "send-message" && req.op !== "ask-answer") mutationChain = mutationChain.then(() => guardedAsync("mutation", execute));
 		else void guardedAsync("op", execute);
 	};
 
@@ -1941,12 +1968,14 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			const newSwitch = reason === "session_switch" && !!event && typeof event === "object" && "reason" in event && event.reason === "new";
 			if (item.choice !== "execute" || !newSwitch || item.switches !== 0 || item.promptSessionId) {
 				failPlanNotes("session changed before the plan started; notes not sent");
+				if (item.approvalToken) removePendingApproval(item.path, item.approvalToken);
 			} else {
 				item.switches = 1;
 				item.expectedSessionId = c.sessionManager.getSessionId();
 				item.expectFirst = true;
 			}
 		}
+		if (item?.state !== "pending" && item?.approvalToken) removePendingApproval(item.path, item.approvalToken);
 		clearReplacing(); // the replacement committed: changes are checked against the new generation again
 		planReview = undefined; // the old session's review is gone; bind reads the host again
 		askReview = undefined;
@@ -1990,6 +2019,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 	pi.on("input", guarded("plan_input", (_event: unknown, c: ExtensionContext) => {
 		if (ctx && isMainTui(c) && planNotes?.state === "pending" && !planNotes.promptSessionId) {
 			failPlanNotes("session changed before the plan started; notes not sent");
+			if (planNotes.approvalToken) removePendingApproval(planNotes.path, planNotes.approvalToken);
 		}
 	}));
 	pi.on("message_start", guarded("plan_prompt", (event: unknown, c: ExtensionContext) => {
@@ -2000,6 +2030,15 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 		const role = "role" in message ? message.role : undefined;
 		const content = "content" in message && Array.isArray(message.content) ? message.content : [];
 		const text = content.map((part: { type?: unknown; text?: unknown }) => part?.type === "text" && typeof part.text === "string" ? part.text : "").join("");
+		if (role === "user") {
+			for (const entry of deliveredMessages.values()) {
+				if (entry.result.state === "pending" && entry.text === text) {
+					entry.result = { state: "admitted" };
+					entry.admit();
+					break;
+				}
+			}
+		}
 		const marker = "synthetic" in message && message.synthetic === true && (role === "developer" || role === "user") && text.startsWith("Plan approved.")
 			? text.match(/\n<plan path="([^"]+)">/) : null;
 		const pending = planNotes?.state === "pending" && planNotes.approved && !planNotes.promptSessionId ? planNotes : undefined;

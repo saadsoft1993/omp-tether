@@ -331,6 +331,7 @@ class SessionControlInRealOmp(unittest.TestCase):
                 "abort",
                 "rename",
                 "send-message",
+                "send-status",
                 "ask-review",
                 "ask-answer",
                 "plan-review",
@@ -506,7 +507,7 @@ class SessionControlInRealOmp(unittest.TestCase):
         self.assertIn(info["interruptMode"], ("immediate", "wait"))
         self.assertIn("goal", info)
         result = self.op("send-message", {"text": "RUN_SLEEP", "messageId": "integration-first"})
-        self.assertEqual(result, {"accepted": True, "delivery": "started"})
+        self.assertEqual(result, {"state": "admitted"})
         kit.wait_for(lambda: self.snapshot()["busy"], timeout=30, what="the sent turn to start")
         self.assertTrue(self.op("abort")["aborted"])
 

@@ -39,7 +39,7 @@ for (const choice of ["execute", "keep", "compact"]) {
 		expect((await call("plan-notes", args)).result).toEqual({ approved: true, requestId: args.requestId, notes: "pending" });
 		expect((await call("plan-notes", args)).result).toMatchObject({ approved: true, notes: "pending", duplicate: true });
 		expect(host.resolveCalls).toHaveLength(1);
-		await host.emit("message_start", { message: { role: "assistant", content: [{ type: "text", text: "earlier turn" }] } });
+		// An earlier busy turn must not trigger delivery.
 		expect(host.messages).toEqual([]);
 		if (choice === "compact") await host.fire("auto_compaction_start");
 		if (choice === "execute") {
@@ -64,7 +64,7 @@ test("missing prompt times out without sending notes", async () => {
 	const original = host.ctx.setTimeout;
 	let expire: (() => void) | undefined;
 	host.ctx.setTimeout = (cb, ms) => {
-		if (ms === 300_000) {
+		if (ms === 1_800_000) {
 			expire = cb;
 			return original(() => {}, ms);
 		}
@@ -75,7 +75,7 @@ test("missing prompt times out without sending notes", async () => {
 	expect((await call("plan-notes", args)).result).toMatchObject({ approved: true, notes: "pending" });
 	expect(expire).toBeDefined();
 	expire!();
-	expect((await info()).planNotes).toMatchObject({ reviewId: review.reviewId, choice: "keep", approved: true, state: "failed", reason: "plan did not start within 5 minutes" });
+	expect((await info()).planNotes).toMatchObject({ reviewId: review.reviewId, choice: "keep", approved: true, state: "failed", reason: "the plan did not start; compaction was cancelled" });
 	expect((await call("plan-notes", args)).result).toMatchObject({ approved: true, notes: "failed", duplicate: true });
 	expect(host.messages).toEqual([]);
 });
@@ -143,8 +143,8 @@ test("an unseen cancelled approval releases its path after 30 minutes", async ()
 	let timeout: (() => void) | undefined;
 	let guardExpiry: (() => void) | undefined;
 	host.ctx.setTimeout = (cb, ms) => {
-		if (ms === 300_000) timeout = cb;
-		if (ms === 1_800_000) guardExpiry = cb;
+		if (ms === 1_800_000 && !guardExpiry) guardExpiry = cb;
+		else if (ms === 1_800_000) timeout = cb;
 		return original(() => {}, ms);
 	};
 	const review = await host.openReview();
@@ -156,4 +156,65 @@ test("an unseen cancelled approval releases its path after 30 minutes", async ()
 	expect((await info()).planNotes).toMatchObject({ state: "failed", reason: "the plan did not start; compaction was cancelled" });
 	const next = await host.openReview();
 	expect((await call("plan-notes", { reviewId: next.reviewId, choice: "keep", notes: "new", requestId: "after-cancel" })).result).toMatchObject({ approved: true, notes: "pending" });
+});
+
+
+test("disabling during an in-flight admission preserves cancellation", async () => {
+	const gate = Promise.withResolvers<void>();
+	host.pi.sendUserMessage = (text: string) => { host.messages.push(text); return gate.promise; };
+	const review = await host.openReview();
+	await call("plan-notes", { reviewId: review.reviewId, choice: "keep", notes: "notes", requestId: "race" });
+	await host.emit("message_start", prompt());
+	await host.waitFor(() => host.messages.length === 1, "send in flight");
+	fs.writeFileSync(path.join(host.dir, "off"), "");
+	await host.waitFor(() => !host.registry(), "control closed");
+	gate.resolve();
+	fs.unlinkSync(path.join(host.dir, "off"));
+	await host.waitFor(() => host.registry(), "control reopened");
+	client.close();
+	({ client, nonce, sessionId, generation } = await Client.toHost(host));
+	expect((await info()).planNotes).toMatchObject({ state: "failed", reason: "control disabled" });
+});
+
+test("manual compaction cancellation has no end hook and input clears the guard", async () => {
+	const review = await host.openReview();
+	await call("plan-notes", { reviewId: review.reviewId, choice: "compact", notes: "notes", requestId: "cancel" });
+	// Manual compaction may emit before_compact; cancellation emits no session_compact.
+	await host.emit("session_before_compact", {});
+	expect((await info()).planNotes.state).toBe("pending");
+	await host.emit("input", { source: "interactive", text: "continue" });
+	expect((await info()).planNotes).toMatchObject({ state: "failed", reason: "session changed before the plan started; notes not sent" });
+	const next = await host.openReview();
+	expect((await call("plan-notes", { reviewId: next.reviewId, choice: "keep", notes: "new", requestId: "after-input" })).result).toMatchObject({ approved: true, notes: "pending" });
+});
+
+test("manual compaction success emits session_compact then the approved prompt", async () => {
+	const review = await host.openReview();
+	await call("plan-notes", { reviewId: review.reviewId, choice: "compact", notes: "notes", requestId: "compact-success" });
+	await host.emit("session_before_compact", {});
+	await host.emit("session_compact", {});
+	expect(host.messages).toEqual([]);
+	await host.emit("message_start", prompt());
+	await host.waitFor(() => host.messages.length === 1, "notes admitted");
+	expect((await info()).planNotes.state).toBe("sent");
+});
+
+test("unsettled notes become uncertain", async () => {
+	const original = host.ctx.setTimeout;
+	host.ctx.setTimeout = (cb, ms) => original(cb, ms === 5000 ? 20 : ms);
+	host.pi.sendUserMessage = (text: string) => { host.messages.push(text); return Promise.withResolvers<void>().promise; };
+	const review = await host.openReview();
+	await call("plan-notes", { reviewId: review.reviewId, choice: "keep", notes: "notes", requestId: "uncertain" });
+	await host.emit("message_start", prompt());
+	await new Promise(resolve => setTimeout(resolve, 50));
+	expect((await info()).planNotes).toMatchObject({ state: "uncertain", reason: "notes may not have been delivered; check the session" });
+});
+
+test("notes send rejection reports failure", async () => {
+	host.pi.sendUserMessage = async () => { throw new Error("refused"); };
+	const review = await host.openReview();
+	await call("plan-notes", { reviewId: review.reviewId, choice: "keep", notes: "notes", requestId: "failed" });
+	await host.emit("message_start", prompt());
+	await new Promise(resolve => setTimeout(resolve, 10));
+	expect((await info()).planNotes).toMatchObject({ state: "failed", reason: "omp did not accept the message" });
 });

@@ -84,6 +84,7 @@ omp plugin config delete omp-session-control controlDir     # only if you had se
 | `ask-review` | Returns the current question's raw HTML form or legacy questions, capped at 32 KiB of serialized UTF-8 |
 | `ask-answer` | Sends a message only if the supplied question ID still matches the open question |
 | `send-message` | Starts or queues a user message and returns on admission, without waiting for the turn |
+| `send-status` | Reads a message receipt without sending again |
 
 **Approving a plan starts executing it**, and sending a message can direct the session to act. A client that can use
 these operations can read the plan or open question and send arbitrary prompts. The registry shows the question ID and
@@ -95,11 +96,11 @@ in this session; a repeated ID within that window returns the original result wi
 be evicted sooner under heavy use. A session switch or process restart clears them. After a timeout, retry only with the
 same ID inside that window; delivery outside the window cannot be deduplicated.
 
-`plan-notes` needs omp 18.19 or newer and returns after approval with the notes pending. It waits up to five minutes for
-the matching synthetic approved-plan prompt and only then sends the notes. For execute, the first message after the first
-new-session switch must be that prompt; an intervening user input or another switch cancels the send. Disabling control
-also cancels it. The plugin refuses a second approval with notes for the same plan while an earlier plugin-applied
-approval is awaiting its prompt; an unresolved guard is cleared after 30 minutes.
+`plan-notes` needs omp 18.19 or newer and returns after approval with the notes pending. It waits for the matching
+synthetic approved-plan prompt, then sends the notes. The first message in the target session must be that prompt;
+an intervening user input or another switch cancels the send. Disabling control also cancels it. Delivery not
+confirmed within five seconds is uncertain; check the session before retrying. A cancelled manual compaction has no
+extension completion event; pending notes are cleared on the next user input or session switch, or after 30 minutes.
 
 ## The same-user caveat
 
