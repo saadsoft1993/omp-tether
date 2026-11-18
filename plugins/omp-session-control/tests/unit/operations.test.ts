@@ -40,10 +40,106 @@ describe("operations", () => {
 				pid: process.pid,
 				protocol: 1,
 				protocols: [1],
-				ops: ["snapshot", "abort", "rename"],
-				plugin: { name: "omp-session-control", version: "0.3.0" },
+				ops: ["snapshot", "abort", "rename", "send-message", "ask-review", "ask-answer"],
+				plugin: { name: "omp-session-control", version: "0.4.0" },
 			},
 		});
+	});
+
+	test("messages settle on admission, queue while busy, and do not block stop", async () => {
+		expect((await c.request(frame(1, "send-message", { text: "first", messageId: "first" }))).result).toEqual({ accepted: true, delivery: "started" });
+		expect((await c.request(frame(2, "send-message", { text: "second", messageId: "second" }))).result).toEqual({ accepted: true, delivery: "queued" });
+		expect((await c.request(frame(3, "send-message", { text: "first", messageId: "first" }))).result).toEqual({ accepted: true, delivery: "started", duplicate: true });
+		expect((await c.request(frame(4, "abort"))).result).toEqual({ aborted: true });
+		expect(host.messages).toEqual(["first", "second"]);
+	});
+
+	test("ask answers are pinned to the currently open question", async () => {
+		await host.emit("tool_execution_start", { toolName: "ask", toolCallId: "ask-1", args: { html: "<form></form>" } });
+		expect((await c.request(frame(1, "ask-review"))).result).toMatchObject({ open: true, askId: "ask-1", html: "<form></form>" });
+		expect((await c.request(frame(2, "ask-answer", { askId: "stale", text: "answer", messageId: "m" }))).code).toBe("changed");
+		expect(host.messages).toEqual([]);
+		expect((await c.request(frame(3, "ask-answer", { askId: "ask-1", text: "answer", messageId: "m" }))).ok).toBe(true);
+		await host.emit("tool_execution_end", { toolName: "ask", toolCallId: "ask-1" });
+		expect((await c.request(frame(4, "ask-review"))).result).toEqual({ open: false });
+		expect((await c.request(frame(5, "ask-answer", { askId: "ask-1", text: "answer", messageId: "m" }))).result).toEqual({ accepted: true, delivery: "started", duplicate: true });
+		expect((await c.request(frame(6, "ask-answer", { askId: "different", text: "answer", messageId: "m" }))).code).toBe("invalid_args");
+		expect((await c.request(frame(7, "send-message", { text: "answer", messageId: "m" }))).code).toBe("invalid_args");
+		expect(host.messages).toEqual(["answer"]);
+	});
+
+	test("message IDs expire and the oldest of 257 is evicted", async () => {
+		host.pi.sendUserMessage = async (text: string) => { host.messages.push(text); };
+		const realNow = Date.now;
+		let now = 1_000_000;
+		Date.now = () => now;
+		try {
+			for (let i = 0; i < 257; i++) {
+				expect((await c.request(frame(i, "send-message", { text: `m${i}`, messageId: `m${i}` }))).ok).toBe(true);
+				now++;
+			}
+			expect((await c.request(frame("old", "send-message", { text: "again", messageId: "m0" }))).result).toEqual({ accepted: true, delivery: "started" });
+			now += 15 * 60_000;
+			expect((await c.request(frame("ttl", "send-message", { text: "expired", messageId: "m256" }))).result).toEqual({ accepted: true, delivery: "started" });
+			expect(host.messages.length).toBe(259);
+		} finally {
+			Date.now = realNow;
+		}
+	});
+
+	test("a session switch clears message IDs", async () => {
+		host.pi.sendUserMessage = async (text: string) => { host.messages.push(text); };
+		await c.request(frame(1, "send-message", { text: "first", messageId: "same" }));
+		host.sessionId = "01a1b65b-2222-7000-8000-000000000002";
+		await host.fire("session_switch");
+		const reg = host.registry()!.data;
+		const reply = await c.request({ ...frame(2, "send-message", { text: "second", messageId: "same" }), sessionId: host.sessionId, generation: reg.generation });
+		expect(reply.result).toEqual({ accepted: true, delivery: "started" });
+		expect(host.messages).toEqual(["first", "second"]);
+	});
+
+	test("different plugin instances have independent message IDs", async () => {
+		host.pi.sendUserMessage = async (text: string) => { host.messages.push(text); };
+		const other = await FakeHost.start({ enable: true });
+		other.pi.sendUserMessage = async (text: string) => { other.messages.push(text); };
+		await other.fire("session_start");
+		const peer = await Client.toHost(other);
+		try {
+			await c.request(frame(1, "send-message", { text: "one", messageId: "same" }));
+			const response = await peer.client.request({ v: 1, id: 2, nonce: peer.nonce, sessionId: peer.sessionId, generation: peer.generation, op: "send-message", args: { text: "two", messageId: "same" } });
+			expect(response.result).toEqual({ accepted: true, delivery: "started" });
+			expect(other.messages).toEqual(["two"]);
+		} finally {
+			peer.client.close();
+			await other.dispose();
+		}
+	});
+
+	test("oversized ask payloads expose no contents", async () => {
+		await host.emit("tool_execution_start", { toolName: "ask", toolCallId: "large", args: { html: "é".repeat(17000) } });
+		expect((await c.request(frame(1, "ask-review"))).result).toEqual({ open: true, askId: "large", tooLarge: true });
+		expect(host.registry()?.data.askReview).toMatchObject({ askId: "large" });
+	});
+
+	test("legacy questions are returned without HTML and old end events cannot close a newer ask", async () => {
+		const questions = [{ id: "colour", question: "Colour?", options: [{ label: "Blue" }] }];
+		await host.emit("tool_execution_start", { toolName: "ask", toolCallId: "old", args: { questions } });
+		await host.emit("tool_execution_start", { toolName: "ask", toolCallId: "new", args: { questions } });
+		await host.emit("tool_execution_end", { toolName: "ask", toolCallId: "old" });
+		expect((await c.request(frame(1, "ask-review"))).result).toEqual({ open: true, askId: "new", questions });
+	});
+
+	test("a quick send rejection is reported and the id can be retried", async () => {
+		host.pi.sendUserMessage = async () => { throw new Error("failed"); };
+		expect((await c.request(frame(1, "send-message", { text: "hello", messageId: "retry" }))).ok).toBe(false);
+		host.pi.sendUserMessage = async () => {};
+		expect((await c.request(frame(2, "send-message", { text: "hello", messageId: "retry" }))).result).toEqual({ accepted: true, delivery: "started" });
+	});
+
+	test("a void-returning omp 18.18 host admits messages", async () => {
+		host.pi.sendUserMessage = (text: string) => { host.messages.push(text); };
+		expect((await c.request(frame(1, "send-message", { text: "hello", messageId: "void-host" }))).result).toEqual({ accepted: true, delivery: "started" });
+		expect(host.messages).toEqual(["hello"]);
 	});
 
 	test("abort interrupts a busy session once and reports an idle one as not aborted", async () => {

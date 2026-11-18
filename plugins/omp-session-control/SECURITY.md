@@ -19,6 +19,10 @@ socket in your control directory; a path-handling flaw (symlinks, races, permiss
 Out of scope, by design (see [`docs/threat-model.md`](docs/threat-model.md)): a process that already runs as your user
 or as root using the socket. It can already do much more than stop and rename sessions.
 
+The socket also admits arbitrary messages and answers to open questions, which can cause the session to run commands.
+Message IDs are held in memory for at most 15 minutes and 256 entries, scoped to the current session. An ID outside that
+window, after a session switch or after a restart can be delivered again; do not assume retries are permanently idempotent.
+
 ## Supported versions
 
 The latest release only, while the version is below 1.0.

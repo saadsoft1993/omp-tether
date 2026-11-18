@@ -12,7 +12,7 @@ renaming inside the session, from 0.2.0 shows a pending plan review and answers 
 - **Same user, same machine.** The socket lives in a `0700` directory in your home. Any process that runs as you can
   use it, and can already do far worse to your session. Read [the same-user caveat](#the-same-user-caveat) before you
   enable it on a machine you share.
-- **No dependencies, one file.** `src/omp-session-control.ts` imports only Node built-ins. It runs inside every
+- **No dependencies, one file.** `src/omp-session-control.ts` imports Node built-ins and optional omp internals. It runs inside every
   interactive session, so it is kept small enough to read in one sitting.
 - **A documented protocol.** [`docs/protocol/control-1.md`](../../docs/protocol/control-1.md) specifies it, and a
   conformance suite checks any implementation against it, so you can write your own client.
@@ -80,22 +80,34 @@ omp plugin config delete omp-session-control controlDir     # only if you had se
 | `rename` | Sets the session name (1 to 120 characters; control and invisible characters are refused) |
 | `plan-review` | While a plan review is open in the terminal: its title, plan file path, choices, execution tiers and the **full text of the plan as proposed**, in chunks |
 | `plan-answer` | Answers that review as if you had picked the choice in the terminal: approve and execute, approve and compact, approve and keep context, refine (with feedback) or save and quit |
+| `plan-notes` | Approves a plan and, once its execution prompt is admitted, sends the supplied notes; status is in `session-info.planNotes` |
+| `ask-review` | Returns the current question's raw HTML form or legacy questions, capped at 32 KiB of serialized UTF-8 |
+| `ask-answer` | Sends a message only if the supplied question ID still matches the open question |
+| `send-message` | Starts or queues a user message and returns on admission, without waiting for the turn |
 
-**Approving a plan starts executing it** in that session, so a client that can use `plan-answer` can make the session
-act. It still cannot read the rest of the conversation, run commands itself, send arbitrary prompts or change files or
-settings; but the plan text itself can contain whatever the model put in it, and the registry shows the review's title
-to anything that can read the control directory. Edits you make inside the terminal's review overlay are not visible
-through the socket, and an approval uses the edited text. Changing operations (and `plan-review`) must carry the live
-session id and generation, so a dashboard that looked at a session before you switched it (`/new`, `/resume`) cannot
-rename, stop or answer the new one by accident.
+**Approving a plan starts executing it**, and sending a message can direct the session to act. A client that can use
+these operations can read the plan or open question and send arbitrary prompts. The registry shows the question ID and
+opening time, but not its contents. Changing operations and reads of the current question must carry the live session
+ID and generation, so a stale client cannot act on a replacement session.
+
+Each message needs a client-generated `messageId`. The plugin remembers the most recent 256 IDs for at most 15 minutes
+in this session; a repeated ID within that window returns the original result without sending again. IDs expire or may
+be evicted sooner under heavy use. A session switch or process restart clears them. After a timeout, retry only with the
+same ID inside that window; delivery outside the window cannot be deduplicated.
+
+`plan-notes` needs omp 18.19 or newer and returns after approval with the notes pending. It waits up to five minutes for
+the matching synthetic approved-plan prompt and only then sends the notes. For execute, the first message after the first
+new-session switch must be that prompt; an intervening user input or another switch cancels the send. Disabling control
+also cancels it. The plugin refuses a second approval with notes for the same plan while an earlier plugin-applied
+approval is awaiting its prompt; an unresolved guard is cleared after 30 minutes.
 
 ## The same-user caveat
 
 The access control is the directory mode. The runtime exposes no peer credentials on a Unix socket, so the extension
 cannot tell *which* process connected, only that it could enter a `0700` directory in your home, which means it runs as
 you (or as root). A process that runs as you can already read your session files, kill omp, and run anything you can.
-So this extension adds no capability such a process lacks, but it does add a convenient way to **stop, rename and,
-with a plan review open, read and approve** your sessions. If you share a Unix account with people you do not trust, do not enable it. Machines where several people
+So this extension adds no capability such a process lacks, but it provides a convenient way to control a session,
+including sending prompts and answering questions. If you share a Unix account with people you do not trust, do not enable it. Machines where several people
 have separate accounts are not a supported setup: the directory permissions should keep the other accounts out, but that
 has not been checked on shared or network-mounted homes (a home shared between machines or containers can also make
 one session delete another's files, because liveness is judged by process id). Full reasoning:

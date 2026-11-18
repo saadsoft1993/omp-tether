@@ -4,7 +4,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Client } from "./support/client";
 import { FakeHost, type FakeModel, type HostOptions, MODEL_A, MODEL_B, MODEL_C } from "./support/fake-host";
 
-const ALL_OPS = ["snapshot", "abort", "rename", "session-info", "compact", "set-model", "set-thinking", "set-mode"];
+const BASE_OPS = ["snapshot", "abort", "rename", "send-message", "ask-review", "ask-answer"];
+const ALL_OPS = [...BASE_OPS, "session-info", "compact", "set-model", "set-thinking", "set-mode"];
 
 let host: FakeHost;
 let c: Client;
@@ -48,12 +49,12 @@ describe("capability detection", () => {
 
 	test("with the plan methods too, the plan operations come first", async () => {
 		await boot({ planReview: true });
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "plan-review", "plan-answer", ...ALL_OPS.slice(3)]);
+		expect(host.registry()?.data.ops).toEqual([...BASE_OPS, "plan-review", "plan-answer", ...ALL_OPS.slice(BASE_OPS.length)]);
 	});
 
 	test("a host with none of the APIs offers only the base operations, and the commands are unsupported", async () => {
 		await boot({ session: false });
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename"]);
+		expect(host.registry()?.data.ops).toEqual(BASE_OPS);
 		for (const op of ["session-info", "compact", "set-model", "set-thinking", "set-mode"]) {
 			expect((await call(op, {})).code).toBe("unsupported");
 		}
@@ -61,28 +62,28 @@ describe("capability detection", () => {
 
 	test("each command is offered on its own API", async () => {
 		await boot({ session: { compact: true } });
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "compact"]);
+		expect(host.registry()?.data.ops).toEqual([...BASE_OPS, "compact"]);
 		c.close();
 		await host.dispose();
 		await boot({ session: { models: true } });
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "session-info"]);
+		expect(host.registry()?.data.ops).toEqual([...BASE_OPS, "session-info"]);
 		c.close();
 		await host.dispose();
 		await boot({ session: { models: true, setModel: true } });
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "session-info", "set-model"]);
+		expect(host.registry()?.data.ops).toEqual([...BASE_OPS, "session-info", "set-model"]);
 		c.close();
 		await host.dispose();
 		await boot({ session: { thinking: true } });
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "session-info", "set-thinking"]);
+		expect(host.registry()?.data.ops).toEqual([...BASE_OPS, "session-info", "set-thinking"]);
 		c.close();
 		await host.dispose();
 		await boot({ session: { modes: true } });
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename", "session-info", "set-mode"]);
+		expect(host.registry()?.data.ops).toEqual([...BASE_OPS, "session-info", "set-mode"]);
 	});
 
 	test("set-model needs both setModel and the model list; set-thinking needs both thinking methods", async () => {
 		await boot({ session: { setModel: true } });
-		expect(host.registry()?.data.ops).toEqual(["snapshot", "abort", "rename"]);
+		expect(host.registry()?.data.ops).toEqual(BASE_OPS);
 	});
 
 	test("an API that disappears after the registry was written answers unsupported", async () => {
@@ -102,6 +103,9 @@ describe("capability detection", () => {
 			models: [],
 			mode: { plan: false, goal: false, loop: false, vibe: false },
 			modeStatus: { plan: "inactive", vibe: "inactive", goal: "inactive", loop: "inactive" },
+			goal: null,
+			interruptMode: null,
+			planNotes: null,
 		});
 	});
 });
@@ -164,7 +168,20 @@ describe("session-info", () => {
 			],
 			mode: { plan: true, goal: false, loop: false, vibe: false },
 			modeStatus: { plan: "active", vibe: "inactive", goal: "paused", loop: "inactive" },
+			goal: null,
+			interruptMode: null,
+			planNotes: null,
 		});
+	});
+
+	test("goal objective respects its serialized UTF-8 byte cap", async () => {
+		await boot();
+		const goal = host.modes.goal as { status: string; objective?: string; tokenBudget?: number };
+		goal.objective = "ship safely";
+		goal.tokenBudget = 1200;
+		expect((await info()).goal).toEqual({ objective: "ship safely", tokenBudget: 1200 });
+		goal.objective = "é".repeat(5000);
+		expect((await info()).goal).toBeNull();
 	});
 
 	test("a model without reasoning has no thinking levels; no model is null", async () => {

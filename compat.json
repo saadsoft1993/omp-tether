@@ -21,7 +21,7 @@
 	},
 	"plugins": {
 		"omp-session-control": {
-			"version": "0.3.0",
+			"version": "0.4.0",
 			"extensionId": "extension-module:omp-session-control",
 			"protocols": ["session-control/1"],
 			"platforms": ["darwin", "linux"],
