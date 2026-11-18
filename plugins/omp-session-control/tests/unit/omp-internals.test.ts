@@ -4,6 +4,7 @@ import { afterAll, describe, expect, mock, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { EXTENSION_ID } from "../../src/omp-session-control";
+import { Client } from "./support/client";
 import { FakeHost } from "./support/fake-host";
 
 let stored: Record<string, unknown> = {};
@@ -11,6 +12,7 @@ let storedCalls: unknown[][] = [];
 let storedFails = false;
 const listeners: Array<() => void> = [];
 let disabled: string[] = [];
+let interrupt = "wait";
 let lookupMode: "ok" | "throws" | "missing" | "listen_throws" = "ok";
 let unsubscribed = 0;
 
@@ -37,7 +39,7 @@ mock.module("@oh-my-pi/pi-coding-agent/config/registry", () => ({
 									return () => void unsubscribed++;
 								},
 							}
-						: undefined;
+						: id === "interruptMode" ? { get: () => interrupt } : undefined;
 				},
 }));
 
@@ -82,6 +84,21 @@ describe("plugin settings read through omp", () => {
 		await h.waitFor(() => h.registry(), "the registry");
 		storedFails = false;
 	});
+});
+
+test("session-info reports the effective interrupt mode", async () => {
+	const h = await FakeHost.start({ enable: true, session: true });
+	hosts.push(h);
+	await h.fire("session_start");
+	const { client, nonce, sessionId, generation } = await Client.toHost(h);
+	try {
+		const request = { v: 1, id: 1, nonce, op: "session-info", sessionId, generation };
+		expect((await client.request(request)).result).toMatchObject({ interruptMode: "wait" });
+		interrupt = "immediate";
+		expect((await client.request(request)).result).toMatchObject({ interruptMode: "immediate" });
+	} finally {
+		client.close();
+	}
 });
 
 describe("disabledExtensions", () => {

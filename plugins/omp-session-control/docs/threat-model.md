@@ -9,30 +9,27 @@ are the author's judgement. Read the source, it is one file.
 ## What it is, and what it gives an attacker
 
 An extension that runs **inside** every interactive omp session, with no sandbox (omp extensions have none). When you
-enable it, the session listens on a Unix socket and answers up to five requests: `snapshot` (session id, generation, name,
-busy flag, process id, offered operations), `abort` (stop the running turn), `rename`, and, from 0.2.0 on an omp that has
-the plan-review methods, `plan-review` (read the open plan review) and `plan-answer` (answer it). From 0.3.0, on an omp that has
-the APIs, also `session-info`, `compact`, `set-model`, `set-thinking` and `set-mode`.
+enable it, the session listens on a private Unix socket. In addition to snapshot, stop, rename, plan review and session commands, version 0.4 lets a client send user messages, read the raw open ask form and goal objective, answer an ask, and approve a plan with notes.
 
-What control over the socket gives: stopping the turn a session is running, changing its title, reading the title (omp may
-derive it from your first message, so it can contain text you typed), and, **while an interactive plan review is open**,
-reading the review (title, plan file path, choices, execution tiers and the full plan text as proposed) and answering
-it. An answer is the same as a pick in the terminal: **approve (execute, compact, keep context) starts executing the
-plan in that session**; refine sends the given feedback to the model as the next planning prompt; save writes the plan
-to its default file, leaves plan mode and clears into a new session. It does **not** give reading the rest of the
-conversation, sending arbitrary prompts, running commands directly, reading or writing files, or changing settings.
+A socket client can direct the agent with arbitrary user messages. The agent may execute commands or access files using the session's permissions. A client can read an open plan or ask form and the goal, but not the full conversation directly. A plan approval also starts execution.
 
-Worst realistic outcome of someone controlling the socket: they interrupt your running turns again and again, put a
-misleading title on a session, read session titles and open plan texts (a plan can quote file contents, paths or
-commands the model saw), or approve a plan you had not yet read, which makes the session carry it out with the
-permissions that session has. That last one is the largest change from 0.1.0: the socket can now cause the agent to act,
-though only by executing a plan that was already proposed to you, and only while its review is open.
+Worst case: a same-user process reads sensitive material in an ask, goal or plan, sends instructions that cause the agent to run commands or access files, and interrupts or changes the session. Treat every socket client as having the owner's session authority.
 
 ## Who is trusted
 
 **The user that runs omp, and root.** Nobody else. Access is decided by one thing: whether a process can enter the
 control directory, which is mode `0700` and owned by you. The runtime provides no peer-credential check on Unix sockets,
 so the extension cannot tell two same-user processes apart, and does not try.
+
+## Message and question controls in 0.4.0
+
+| Threat | Answer | Residual |
+|---|---|---|
+| A client sends instructions | Access requires the private same-user socket; messages are bounded to 8000 UTF-16 units | The agent can act on those instructions with the session's permissions |
+| Ask form or goal exposure | Ask forms are capped at 32 KiB; goal JSON is capped at 8 KiB | Any socket client can read their contents; clients must escape them and not log them |
+| Conflicting ask answers | The plugin pins the open ask ID and admits at most one non-failed answer per question | An answer already admitted cannot be withdrawn |
+| Plan notes go to the wrong session | The plugin waits for the approved plan prompt in the expected session, and refuses an overlapping same-path approval | An unconfirmed send is uncertain; check the session before retrying |
+| A retry duplicates a message | Receipts remember up to 256 IDs for 15 minutes, and are cleared on session switch | An expired or evicted ID can send again; an in-flight send cannot be cancelled by disabling control |
 
 ## Session commands: what is new in 0.3.0
 
@@ -70,7 +67,7 @@ changes what later turns cost and do.
 
 Any program you run (an editor plugin, a build script, an npm package's install script, a compromised dependency) runs as
 you. It can already read your omp session files and credentials, send signals to omp (`kill`), and attach a debugger. It
-can use this socket too. That adds one more way to stop, rename and (with a plan review open) approve sessions, and no capability it did not have. This is
+can use this socket too. That adds a convenient way to send instructions, read the open ask and goal, stop, rename and approve sessions, but no capability it did not already have as the same user. This is
 the same trust model as an SSH agent socket or a Docker socket in your home: **if you do not trust the programs running
 under your account, do not enable it.**
 
@@ -81,11 +78,11 @@ under your account, do not enable it.**
 | Another user on the same machine connects | The directory is `0700` and the socket `0600`; the extension refuses a directory owned by someone else, reached through a symlink in its last component, or writable by group or others, and tightens a merely too-readable mode to `0700` through the open directory | A user with root, or one who knows your password, is out of scope. Only the last path component is checked: a configured directory under a parent that other users can write to could be swapped from underneath, so keep it under your home (the default is). On shared multi-user hosts see the supported-environment note below |
 | The feature turns on by itself (a hostile project, a supply-chain update) | It is inert until the control directory exists **and** holds an `enabled` file you (or your setup command) created. Installing, updating or loading the extension creates nothing and opens nothing | The two settings come from the environment and from the user-level plugin settings only; the extension asks omp for the settings of the home directory, so a repository's own `.omp` folder cannot redirect the socket | `OMP_SESSION_CONTROL_DIR` is read from the environment omp starts in: a tool that sets environment variables per project folder (direnv, mise and similar) can point it elsewhere. The directory still has to be yours, private, and contain `enabled` |
 | A client talks to the wrong or a stale session (pid reuse, a registry left by a crash) | The registry is named after a per-start random nonce that every request must carry; changing requests must carry the live session id and generation, which change when the session switches or branches (`/new`, `/resume`, `/fork`, a branch) | A client that skips the pid-alive check may connect to a dead socket and simply fail |
-| Malformed or hostile frames crash or wedge the session | One frame is at most 64 KiB; JSON parsing is wrapped; unknown fields and operations get error replies; at most 4 clients and 16 connections in all, 16 requests in flight, idle connections closed after 60 s, a frame must finish within 10 s of its first byte, an operation omp does not finish in 10 s is abandoned with a `timeout` reply, readers that never read are cut off at 256 KiB of backlog, turned-away sockets are destroyed even when the peer never closes | A same-user client can still keep 4 connections busy and make real dashboards wait (denial of service by a trusted party) |
+| Malformed or hostile frames crash or wedge the session | One frame is at most 64 KiB; JSON parsing is wrapped; unknown fields and operations get error replies; at most 4 ordinary clients plus a snapshot/abort-only slot and 16 connections in all, 16 requests in flight, idle connections closed after 60 s, a frame must finish within 10 s of its first byte, an operation omp does not finish in 10 s is abandoned with a `timeout` reply, readers that never read are cut off at 256 KiB of backlog, turned-away sockets are destroyed even when the peer never closes | A same-user client can still keep 4 connections busy and make real dashboards wait (denial of service by a trusted party) |
 | An exception in a callback takes down the whole session (omp treats an uncaught exception as fatal) | Every callback given to a socket, watcher or promise is wrapped; timers use omp's isolated `ctx.setTimeout`; a unit test audits the source for raw timers and unwrapped handlers, and a crash test runs the extension in a bare process with failing omp calls and hostile clients | Dependencies or future edits could break this; the audit test is there to catch the second |
 | Symlink and race tricks in the control directory (same user only) | Files are opened with `O_NOFOLLOW`, the directory is checked and its mode set through one open handle, registries are written through a temporary file and an atomic rename, the log never follows a symlink, stale cleanup only unlinks plain files and sockets inside the directory. A directory that is replaced or removed, or a deleted socket or registry, makes the listener close and start again | A same-user attacker can delete or replace files in your own directory; that only closes or restarts control. Stale cleanup decides liveness by process id, so a home directory shared between machines or containers is unsupported |
 | A misleading or disguised session name (bidirectional overrides, zero-width characters, control characters, very long names) | Names are limited to 120 characters, trimmed, with control characters and invisible format characters refused | A dashboard must still escape names when it shows them (HTML, terminal). That is the client's job |
-| Resource use | 4 clients, 16 connections, 16 in flight, one small listener per session. File watches are backed by a bounded recheck: while the control directory exists (or was in use), every 2 s the session looks at a few files again (three `lstat` calls and no writes), through omp's isolated timers (one pending at a time, cleared at shutdown). Nothing is scheduled when no control directory exists | A watch that misses an event (one made while the watch is being armed, or dropped under load) delays the effect of a marker, `off` file or directory change by at most about 2 s |
+| Resource use | 4 ordinary clients plus a snapshot/abort-only slot, 16 connections, 16 in flight, one small listener per session. File watches are backed by a bounded recheck: while the control directory exists (or was in use), every 2 s the session looks at a few files again (three `lstat` calls and no writes), through omp's isolated timers (one pending at a time, cleared at shutdown). Nothing is scheduled when no control directory exists | A watch that misses an event (one made while the watch is being armed, or dropped under load) delays the effect of a marker, `off` file or directory change by at most about 2 s |
 | Supply chain: the plugin itself | One source file, no dependencies, no install scripts (omp runs none for marketplace installs), no network access, no child processes. The catalog entry can be pinned to a commit | You are trusting this repository's author and the release you pinned. Read `src/omp-session-control.ts` before you enable it |
 | Information in logs | `events.log` (mode `0600`, emptied before it passes 256 KiB, at most 2 KiB per record) records starts, stops and errors: kind, time, process id, session id and an error category (never exception text). Replies to clients never carry omp's error text, only a fixed message. The `debugLog` setting adds error text cut to 200 characters | Request content and names are not written deliberately, but with `debugLog` on, an exception from omp could carry any value (a name, a path, a credential). It stays in the 0700 directory; switch the setting off after use |
 | A FIFO, device or other special file where the extension expects a plain file (`events.log`, `enabled`, `off`) | Such an entry is never opened: opening a FIFO for writing blocks the whole session, and no guard or timer can rescue a blocked synchronous call. The log's mode is set to `0600` through the open descriptor | A same-user attacker can still delete or replace files; that only closes control |

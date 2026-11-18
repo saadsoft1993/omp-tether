@@ -90,6 +90,7 @@ export class FakeHost {
 	name: string | undefined;
 	busy = false;
 	aborts = 0;
+	messages: string[] = [];
 	notices: Array<{ message: string; type?: string }> = [];
 	timerErrors: unknown[] = [];
 	uncaught: unknown[] = [];
@@ -255,6 +256,11 @@ export class FakeHost {
 			},
 			registerCommand: (name: string, options: { handler: (args: string, ctx: FakeContext) => Promise<void> }) => {
 				this.commands.set(name, options);
+			},
+			sendUserMessage: async (text: string) => {
+				this.messages.push(text);
+				this.busy = true;
+				await Promise.withResolvers<void>().promise;
 			},
 			getSessionName: () => this.name,
 			setSessionName: async (name: string) => {

@@ -3,6 +3,11 @@
 All notable changes to `omp-session-control`. The wire protocol has its own number (`session-control/1`) and changes
 only by spec; see `docs/protocol/control-1.md` in the repository.
 
+## 0.4.0 (2026-11-18)
+
+- Expose the goal objective and interrupt mode in `session-info`, and track open ask forms for dashboard review.
+- Add pinned `ask-answer` and `send-message`, with bounded in-memory retry deduplication.
+
 ## 0.3.0 (2026-11-16)
 
 Session commands from a dashboard (each is offered only when the host omp has the API behind it; omp 18.19.0 has them):

@@ -20,7 +20,7 @@ Words in capitals (MUST, SHOULD, MAY) have their usual RFC 2119 meaning.
   and the **full text of the plan as proposed** (through `plan-review`; the registry carries only the review's id, a
   title cut to 200 characters and the time it opened). A client of the plan operations can also answer the review,
   which for an approval **starts executing the plan**, and send feedback text that omp uses as the next planning
-  prompt. Nothing else of the conversation, the files or the settings is reachable. Note that omp may derive the name
+  prompt. Since plugin 0.4.0, a client can send user messages the agent may act on, read the raw open ask form and goal objective, answer asks, and approve with notes. The full conversation is not directly readable; a message can nevertheless cause the agent to act on files or run commands. Note that omp may derive the name
   from your first message, so the name can contain text you typed, and that a plan can quote anything the model read.
 
 ## 2. The control directory
@@ -72,8 +72,8 @@ them, close the listener, unlink the socket and the registry entry.
   "socket": "/home/u/.config/omp-session-control/0123456789abcdef.sock",
   "sessionId": "01a1c0db-82df-745a-95c4-c1388130d934",
   "generation": 0,
-  "plugin": { "name": "omp-session-control", "version": "0.3.0" },
-  "ops": ["snapshot", "abort", "rename", "plan-review", "plan-answer", "session-info", "compact", "set-model", "set-thinking", "set-mode"],
+  "plugin": { "name": "omp-session-control", "version": "0.4.0" },
+  "ops": ["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer", "plan-review", "plan-answer", "plan-notes", "session-info", "compact", "set-model", "set-thinking", "set-mode"],
   "planReview": { "reviewId": "2f1b...", "title": "Add a widget", "openedAt": "2026-11-16T08:01:12.004Z" },
   "writtenAt": "2026-11-16T08:01:12.010Z"
 }
@@ -113,7 +113,7 @@ Blank lines are ignored. Both directions use the same framing.
 | `id` | string of at most 128 characters, or a number. Echoed in the reply |
 | `nonce` | MUST equal the registry's `nonce` |
 | `op` | one of the operations in section 6 |
-| `sessionId`, `generation` | required for `abort`, `rename`, `plan-review` and `plan-answer`, ignored by `snapshot` |
+| `sessionId`, `generation` | required for every operation except `snapshot` |
 | `args` | object; absent means `{}` |
 
 ### Reply
@@ -126,8 +126,7 @@ Blank lines are ignored. Both directions use the same framing.
 
 `id` is `null` when the request had no usable id. `detail` is optional. A client MUST NOT parse `message`; it is for
 people. The `message` of an `internal` error is a fixed text: omp's own error text (which can contain file paths) goes to `events.log` only. Replies to read-only operations (`snapshot`, `plan-review`) MAY arrive in any order, so a client with several requests in flight matches
-them by `id`. Changing operations are executed one at a time, in the order they arrived on the socket, and their
-replies come in that order. Serialization lasts until omp has actually settled the operation, not just until the client
+them by `id`. Changing operations are initiated in arrival order. Message sends release the mutation queue after initiation, so their replies can arrive out of order and Stop remains available. Other mutation serialization lasts until omp has actually settled the operation, not just until the client
 stopped waiting: after a `timeout`, further changing operations get `mutation_pending` until omp finishes the one that
 timed out (reads keep working), including across an off and on cycle. A changing operation whose client has disconnected, or whose listener has closed, before the operation starts is not run.
 
@@ -155,7 +154,8 @@ timed out (reads keep working), including across an off and on cycle. A changing
 | `busy` | the session commands and the other changing operations: a session replacement that the plugin allowed may be committing; the message is "Session is switching. If a switch was cancelled by another extension, restart the session to re-enable remote changes." See the end of the session commands section for when the hold ends |
 | `mutation_pending` | an earlier changing operation has not finished in omp yet (see `timeout`); retry later |
 | `too_large` | a frame exceeded 65 536 bytes; the connection is closed after this reply. Also, for `plan-review` only: the review's metadata alone does not fit in one reply frame (the connection stays open) |
-| `too_many_clients` | the 4-client limit is reached; sent on a new connection, which is then closed |
+| `too_many_clients` | ordinary client capacity is reached, or the reserved snapshot/abort-only slot is used for another operation |
+| `question_closed` | a different message ID already answered the open ask |
 | `closing` | sent unsolicited (`id` null) just before the session closes the connection |
 
 The checks happen in this order: JSON, object, `v`, `id`, `nonce`, off switch, `op`, `args`, in-flight limit, then (for
@@ -174,14 +174,36 @@ Anything else needs a new version.
 
 ## 6. Operations
 
+### `send-message`
+
+Target-checked. Args `{text,messageId}`: text is nonblank and at most 8000 UTF-16 units; ID is 1–128 ASCII letters, digits, `_` or `-`. Result `{state:"admitted"}`, `{state:"failed",reason}` or `{state:"pending"}` after at most 5 s. Admission is not turn completion. A repeated ID with the same text returns its receipt with `duplicate:true` without resending; different text is `invalid_args`.
+
+### `send-status`
+
+Target-checked read-only `{messageId}`; returns `{state:"pending"|"admitted"|"unknown"}` or `{state:"failed",reason}` and never sends.
+
+### `ask-review`
+
+Target-checked read-only. Returns `{open:false}`, or `{open:true,askId,html}` on 18.19 or `{open:true,askId,questions}` on 18.18. When serialized content exceeds 32 KiB, returns `{open:true,askId,tooLarge:true}` instead.
+
+### `ask-answer`
+
+Target-checked `{askId,text,messageId}` uses the same receipts as `send-message`, and sends only if the ask is still open. A different ID after a pending or admitted answer to that ask gets `question_closed`; the same ID returns its receipt.
+
+### `plan-notes`
+
+Target-checked `{reviewId,choice,notes,requestId,role?}`; only advertised on omp 18.19 or newer. Choices are `execute`, `keep`, `compact`. The approval is applied once and returns `{approved:true,requestId,notes:"pending"}` immediately. Duplicates return the current state; reusing the ID with different notes, review or choice is `invalid_args`.
+
+`session-info.planNotes` is `{requestId,reviewId,choice,approved,state,reason?,at}` where state is `pending`, `sent`, `failed` or `uncertain`. Notes are sent only after the expected session's first message is the matching synthetic approved-plan prompt. An intervening input or wrong session fails closed. A same-path pending approval is refused. An unsettled send after 5 s is `uncertain`; later settlement updates it. Disabling control before sending fails it; an in-flight send retains its actual outcome. Cancelled manual compaction has no completion hook, so it is cleared on next input/switch or after 30 minutes.
+
 ### `snapshot`
 
 Read-only. `args` is ignored.
 
 ```json
 {"sessionId":"...","generation":0,"name":null,"busy":false,"compacting":false,"pid":12345,
- "protocol":1,"protocols":[1],"ops":["snapshot","abort","rename","plan-review","plan-answer","session-info","compact","set-model","set-thinking","set-mode"],
- "plugin":{"name":"omp-session-control","version":"0.3.0"}}
+ "protocol":1,"protocols":[1],"ops":["snapshot","abort","rename","send-message","send-status","ask-review","ask-answer","plan-review","plan-answer","plan-notes","session-info","compact","set-model","set-thinking","set-mode"],
+ "plugin":{"name":"omp-session-control","version":"0.4.0"}}
 ```
 
 `busy` is true while a turn is running (streaming or running tools). It does **not** cover a compaction. `compacting` (plugin 0.3.0; a client MUST treat a missing field as unknown) is true while a compaction is unsettled in omp: one started by `compact`, **including after that request answered `timeout`**, or one omp started itself (auto-compaction). It is the signal to poll after a `compact` timeout, and also in `session-info`. `name` is the session's current title or `null`. `ops` is the capability list: a client MUST NOT send an operation that `ops` (or the registry `ops`) does not list: `plan-review` and `plan-answer` get `unknown_op`, the session commands of plugin 0.3.0 (`session-info`, `compact`, `set-model`, `set-thinking`, `set-mode`) get `unsupported`.
@@ -352,8 +374,8 @@ reason code in the message (`busy`, `conflict`, `disabled`, `invalid_request`). 
 | Limit | Value |
 |---|---|
 | Frame size | 65 536 bytes; a longer line with no newline gets `too_large` and the connection closes |
-| Simultaneous clients | 4; a fifth gets `too_many_clients` and is closed |
-| Requests in flight | 16 across all clients; more get `overloaded` |
+| Simultaneous clients | 4 ordinary clients plus one snapshot/abort-only slot; further clients get `too_many_clients` |
+| Requests in flight | 16 ordinary requests, plus one reserved snapshot or abort; excess gets `overloaded` |
 | Idle connection | closed after 60 s without data (the plugin setting `idleTimeoutMs` / `OMP_SESSION_CONTROL_IDLE_MS`, 100 to 3 600 000 ms). Any received byte resets the timer; a connection that has a request still unanswered is never closed as idle |
 | Incomplete frame | a frame must be complete 10 s after its first byte; a client that trickles bytes is disconnected whatever the idle timeout |
 | Operation | 10 s (`compact`: 180 s); after that the client gets `timeout` and the request stops counting against the in-flight limit |
@@ -362,6 +384,10 @@ reason code in the message (`busy`, `conflict`, `disabled`, `invalid_request`). 
 | Name | 120 characters |
 | Plan review id | 128 UTF-16 units |
 | Registry title | 200 UTF-16 units, never splitting a surrogate pair; shortened further if the registry would pass 4096 bytes |
+| Message and plan notes | 8000 UTF-16 units each |
+| Ask form | 32 KiB serialized UTF-8 |
+| Goal object | 8 KiB serialized UTF-8; objective at most 2000 UTF-16 units and well-formed Unicode |
+| Message receipts | Up to 256 entries, 15 minutes, cleared on session switch |
 | Plan feedback | 8000 UTF-16 units |
 | Plan role | 64 UTF-16 units |
 | Compact instructions | 2000 UTF-16 units |
@@ -396,7 +422,7 @@ bun plugins/omp-session-control/tests/conformance/suite.ts --dir <control dir> [
 | Group | Needs | Checks |
 |---|---|---|
 | default | a live session | R1 to R5 directory (a real directory, not a symlink), registry, socket, pid, all checked before anything is connected: if one fails the run stops with S0 and attempts no connection and no mutation; P1 to P15 snapshot and every framing, version, id, nonce, op, args, staleness, name and size rule, abuse survival |
-| `--exclusive` | no other client connected | L1 the 4-client limit |
+| `--exclusive` | no other client connected | L1 the client limit and reserved stop slot |
 | `--idle-ms N` | the session's idle timeout is about N ms | L2 idle close |
 | `--mutate` | an idle session whose name may change | M1 abort on idle, M2 rename, M3 ordered mutations |
 | `--off-switch` | permission to create `off` in the directory | O1 close on `off`, new nonce after removal |

@@ -185,7 +185,7 @@ class SessionControlInRealOmp(unittest.TestCase):
         self.assertFalse((self.scratch.home / ".config").exists(), "installing must not create anything outside ~/.omp")
         self.omp.type("/session-control status")
         kit.wait_for(lambda: "inert" in self.omp.text(), timeout=20, what="the status text")
-        self.assertIn("omp-session-control 0.3.0", self.omp.text())
+        self.assertIn("omp-session-control 0.4.0", self.omp.text())
         self.assertFalse((self.scratch.home / ".config").exists(), "status must not create anything either")
 
     def test_01_on_command_enables_this_session(self) -> None:
@@ -330,8 +330,13 @@ class SessionControlInRealOmp(unittest.TestCase):
                 "snapshot",
                 "abort",
                 "rename",
+                "send-message",
+                "send-status",
+                "ask-review",
+                "ask-answer",
                 "plan-review",
                 "plan-answer",
+                "plan-notes",
                 "session-info",
                 "compact",
                 "set-model",
@@ -495,6 +500,16 @@ class SessionControlInRealOmp(unittest.TestCase):
         self.assertTrue(self.omp.alive())
         # no argument text in the log
         self.assertNotIn("keep the probe details", (self.ctl_dir / "events.log").read_text())
+
+    def test_76_message_admission_does_not_block_stop(self) -> None:
+        self.assertTrue(kit.wait_for(lambda: not self.snapshot()["busy"], timeout=30, what="an idle session"))
+        info = self.op("session-info")
+        self.assertIn(info["interruptMode"], ("immediate", "wait"))
+        self.assertIn("goal", info)
+        result = self.op("send-message", {"text": "RUN_SLEEP", "messageId": "integration-first"})
+        self.assertEqual(result, {"state": "admitted"})
+        kit.wait_for(lambda: self.snapshot()["busy"], timeout=30, what="the sent turn to start")
+        self.assertTrue(self.op("abort")["aborted"])
 
     def test_90_exit_closes_the_socket_and_removes_the_registry(self) -> None:
         reg = self.reg()
