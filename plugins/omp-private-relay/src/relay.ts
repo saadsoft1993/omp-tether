@@ -44,6 +44,13 @@ const CLOSE_SLOW = 4008;
 const CLOSE_FULL = 4029;
 /** A socket the relay closes gets this long to take its close frame before it is cut. */
 const CLOSE_GRACE_MS = 5_000;
+/**
+ * Bun resets a socket's idle timer on receive and on drain, then pings 16 s before the timeout. Behind Tailscale Serve the
+ * join catch-up leaves Bun quickly but can sit for minutes in the proxy and DERP path, and the ping waits behind it: at the
+ * 120 s default the pong misses its window and Bun drops a guest that is still receiving. 960 s is Bun's maximum;
+ * checkStalls still cuts a guest whose relay-side queue stops draining.
+ */
+const GUEST_IDLE_TIMEOUT_S = 960;
 const PAIR_FAILURES_PER_MINUTE = 10;
 const PAIR_BODY_MAX = 1024;
 
@@ -559,13 +566,13 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		}
 	}
 
-	function websocketHandlers(maxPayloadLength: number): Bun.WebSocketHandler<SocketData> {
+	function websocketHandlers(maxPayloadLength: number, idleTimeout: number): Bun.WebSocketHandler<SocketData> {
 		return {
 			maxPayloadLength,
 			// Above the per-connection cap so Bun never silently drops a frame; send() closes first.
 			backpressureLimit: limits.connQueueMax + limits.maxHostFrame,
 			closeOnBackpressureLimit: true,
-			idleTimeout: 120,
+			idleTimeout,
 			sendPings: true,
 			open: onOpen,
 			message: onMessage,
@@ -759,7 +766,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			upgrading--;
 			return text(426, "websocket upgrade required");
 		},
-		websocket: websocketHandlers(limits.maxHostFrame),
+		websocket: websocketHandlers(limits.maxHostFrame, 120),
 	});
 
 	let guestServer: Bun.Server<SocketData>;
@@ -799,7 +806,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			upgrading--;
 			return text(426, "websocket upgrade required");
 		},
-		websocket: websocketHandlers(limits.maxGuestFrame),
+		websocket: websocketHandlers(limits.maxGuestFrame, GUEST_IDLE_TIMEOUT_S),
 	});
 	} catch (err) {
 		hostServer.stop(true);
