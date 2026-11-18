@@ -199,8 +199,9 @@ group or others can write is refused, with every problem listed. The JSON Schema
 | `limits.maxConnections` | `OMP_PRIVATE_RELAY_MAX_CONNECTIONS` | 256 | A hard cap on open WebSockets (hosts and browsers, counting upgrades in progress): beyond it the upgrade is refused with 503 before a socket exists. Plain HTTP connections are not counted (Bun closes idle ones) |
 | `limits.maxHostFrame` | `OMP_PRIVATE_RELAY_MAX_HOST_FRAME` | 16 MiB | Largest frame from an omp session |
 | `limits.maxGuestFrame` | `OMP_PRIVATE_RELAY_MAX_GUEST_FRAME` | 4 MiB | Largest frame from a browser |
-| `limits.connQueueMax` | `OMP_PRIVATE_RELAY_CONN_QUEUE_MAX` | 32 MiB | Queued bytes per connection before it is cut with 4008 |
-| `limits.relayQueueMax` | `OMP_PRIVATE_RELAY_QUEUE_MAX` | 128 MiB | Queued bytes in all before slow connections are cut |
+| `limits.connQueueMax` | `OMP_PRIVATE_RELAY_CONN_QUEUE_MAX` | 256 MiB | Memory budget for queued bytes per connection before it is cut with 4008 |
+| `limits.relayQueueMax` | `OMP_PRIVATE_RELAY_QUEUE_MAX` | 1 GiB | Memory budget for queued bytes in all before connections are cut |
+| `limits.stallMs` | `OMP_PRIVATE_RELAY_STALL_MS` | 30 s | A guest that drains nothing this long is cut with 4008; 0 disables |
 | `limits.recheckMs` | `OMP_PRIVATE_RELAY_RECHECK_MS` | 10000 | How often open browsers are checked against the store (at most 30000) |
 | `limits.restartGraceMs` | `OMP_PRIVATE_RELAY_RESTART_GRACE_MS` | 60000 | At most 120000. After a start, a missing room answers 4001 (retry) instead of 4004 |
 

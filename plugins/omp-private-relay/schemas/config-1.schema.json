@@ -88,8 +88,9 @@
 				"maxConnections": { "type": "integer", "minimum": 4, "maximum": 100000, "default": 256, "description": "WebSockets open or being upgraded, on both listeners. The next upgrade is refused with HTTP 503 before a socket exists. Plain HTTP connections are not counted." },
 				"maxHostFrame": { "type": "integer", "minimum": 1024, "maximum": 268435456, "default": 16777216, "description": "Bytes. Largest frame an omp host may send." },
 				"maxGuestFrame": { "type": "integer", "minimum": 1024, "maximum": 268435456, "default": 4194304, "description": "Bytes. Largest frame a browser may send." },
-				"connQueueMax": { "type": "integer", "minimum": 65536, "maximum": 1073741824, "default": 33554432, "description": "Bytes queued for one connection before it is cut with 4008." },
-				"relayQueueMax": { "type": "integer", "minimum": 65536, "maximum": 4294967296, "default": 134217728, "description": "Bytes queued across all connections before slow ones are cut." },
+				"connQueueMax": { "type": "integer", "minimum": 65536, "maximum": 1073741824, "default": 268435456, "description": "Bytes queued for one connection before it is cut with 4008 (a memory budget; draining guests are never cut below it)." },
+				"relayQueueMax": { "type": "integer", "minimum": 65536, "maximum": 4294967296, "default": 1073741824, "description": "Bytes queued across all connections before slow ones are cut." },
+				"stallMs": { "type": "integer", "minimum": 0, "maximum": 600000, "default": 30000, "description": "A guest with queued bytes that drains nothing for this many ms is closed with 4008. 0 disables." },
 				"recheckMs": { "type": "integer", "minimum": 100, "maximum": 30000, "default": 10000, "description": "How often open browsers are checked against the pairing store. At most 30 s." },
 				"restartGraceMs": { "type": "integer", "minimum": 0, "maximum": 120000, "default": 60000, "description": "After a start, a browser asking for a room whose host has not reconnected yet is told to retry (4001) instead of that the room does not exist (4004)." }
 			}

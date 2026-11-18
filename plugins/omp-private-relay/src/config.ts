@@ -20,6 +20,8 @@ export interface Limits {
 	maxGuestFrame: number;
 	connQueueMax: number;
 	relayQueueMax: number;
+	/** ms a guest with queued bytes may drain nothing before it is closed with 4008; 0 disables */
+	stallMs: number;
 	recheckMs: number;
 	restartGraceMs: number;
 }
@@ -50,8 +52,11 @@ export const DEFAULT_LIMITS: Limits = {
 	maxConnections: 256,
 	maxHostFrame: 16 * MiB,
 	maxGuestFrame: 4 * MiB,
-	connQueueMax: 32 * MiB,
-	relayQueueMax: 128 * MiB,
+	// Memory budgets, not speed limits: a guest that keeps draining is never cut for size below them.
+	// Real resident memory can reach about 2x these (Bun doubles its send buffer as it grows).
+	connQueueMax: 256 * MiB,
+	relayQueueMax: 1024 * MiB,
+	stallMs: 30_000,
 	recheckMs: 10_000,
 	restartGraceMs: 60_000,
 };
@@ -86,6 +91,7 @@ export const ENV_OVERRIDES: EnvOverride[] = [
 	{ env: "OMP_PRIVATE_RELAY_MAX_GUEST_FRAME", path: ["limits", "maxGuestFrame"], kind: "int" },
 	{ env: "OMP_PRIVATE_RELAY_CONN_QUEUE_MAX", path: ["limits", "connQueueMax"], kind: "int" },
 	{ env: "OMP_PRIVATE_RELAY_QUEUE_MAX", path: ["limits", "relayQueueMax"], kind: "int" },
+	{ env: "OMP_PRIVATE_RELAY_STALL_MS", path: ["limits", "stallMs"], kind: "int" },
 	{ env: "OMP_PRIVATE_RELAY_RECHECK_MS", path: ["limits", "recheckMs"], kind: "int" },
 	{ env: "OMP_PRIVATE_RELAY_RESTART_GRACE_MS", path: ["limits", "restartGraceMs"], kind: "int" },
 ];

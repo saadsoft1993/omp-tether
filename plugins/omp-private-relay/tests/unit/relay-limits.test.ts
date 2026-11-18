@@ -13,6 +13,7 @@ import {
 	type Relay,
 	relayCloses,
 	stalledGuest,
+	throttledGuest,
 	startRelay,
 	stats,
 	waitUntil,
@@ -160,4 +161,42 @@ describe("restart", () => {
 		h2.ws.close();
 		await closedWithin(g2, 3000);
 	}, 20_000);
+});
+
+
+describe("progress-based cut", () => {
+	let relay: Relay;
+	beforeAll(async () => {
+		relay = await startRelay({ env: { OMP_PRIVATE_RELAY_RESTART_GRACE_MS: "0", OMP_PRIVATE_RELAY_STALL_MS: "3000" } });
+	});
+	afterAll(async () => relay.stop());
+
+	test("a slow but steady guest receives a 96 MiB catch-up under the default caps", async () => {
+		const room = makeRoomId("prg");
+		const h = hostPeer(relay, room);
+		await h.opened;
+		const g = await throttledGuest(relay, room, 1 * MiB, 62);
+		try {
+			expect(await waitUntil(() => h.control.length === 1, 2000)).toBe(true);
+			const peerId = JSON.parse(h.control[0]!).peer;
+			for (let i = 0; i < 96; i++) h.ws.send(frame(peerId, 1 * MiB));
+			expect(await waitUntil(() => g.frames() === 96, 40_000)).toBe(true);
+			expect(relayCloses(relay, room, "guest")).not.toContain(4008);
+			expect((await stats(relay)).maxConnQueued).toBeGreaterThan(32 * MiB);
+		} finally { g.destroy(); h.ws.close(); }
+	}, 60_000);
+
+	test("a guest that stops reading is cut after the stall window", async () => {
+		const room = makeRoomId("stl");
+		const h = hostPeer(relay, room);
+		await h.opened;
+		const g = await stalledGuest(relay, room);
+		try {
+			expect(await waitUntil(() => h.control.length === 1, 2000)).toBe(true);
+			const peerId = JSON.parse(h.control[0]!).peer;
+			for (let i = 0; i < 64; i++) h.ws.send(frame(peerId, 1 * MiB));
+			expect(await waitUntil(() => relayCloses(relay, room, "guest").includes(4008), 15_000)).toBe(true);
+			expect(relay.log()).toContain('"reason":"stalled"');
+		} finally { g.destroy(); h.ws.close(); }
+	}, 30_000);
 });

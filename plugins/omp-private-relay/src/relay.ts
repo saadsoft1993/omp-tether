@@ -63,6 +63,10 @@ interface SocketData {
 	connectedAt: number;
 	ua: string;
 	closing: boolean;
+	sentBytes: number;
+	lastQueued: number;
+	lastSent: number;
+	stallSince: number;
 }
 type RelaySocket = Bun.ServerWebSocket<SocketData>;
 
@@ -409,13 +413,13 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		const size = typeof data === "string" ? Buffer.byteLength(data) : data.byteLength;
 		const queued = ws.getBufferedAmount();
 		if (queued + size > limits.connQueueMax) {
-			log("slow_consumer", { ...meta(ws), queued, size });
+			log("slow_consumer", { ...meta(ws), reason: "queue_cap", queued, size });
 			closeSocket(ws, CLOSE_SLOW, "slow consumer");
 			return;
 		}
 		const total = relayQueued();
 		if (total + size > limits.relayQueueMax) {
-			log("relay_queue_full", { ...meta(ws), total, size });
+			log("relay_queue_full", { ...meta(ws), reason: "relay_cap", total, size });
 			closeSocket(ws, CLOSE_SLOW, "relay queue full");
 			return;
 		}
@@ -423,10 +427,28 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			closeSocket(ws, CLOSE_SLOW, "send dropped");
 			return;
 		}
+		ws.data.sentBytes += size + (size < 126 ? 2 : size < 65_536 ? 4 : 10);
 		const after = ws.getBufferedAmount();
 		if (after > stats.maxConnQueued) stats.maxConnQueued = after;
 		// `total` already counted this socket's queue before the send.
 		if (total - queued + after > stats.maxRelayQueued) stats.maxRelayQueued = total - queued + after;
+	}
+
+	function checkStalls(now: number): void {
+		for (const ws of sockets) {
+			const data = ws.data;
+			if (data.closing || data.listener !== "guest") continue;
+			const q = ws.getBufferedAmount();
+			const drained = data.lastQueued + (data.sentBytes - data.lastSent) - q;
+			if (q === 0 || drained > 0) data.stallSince = 0;
+			else if (data.stallSince === 0) data.stallSince = now;
+			else if (now - data.stallSince >= limits.stallMs) {
+				log("slow_consumer", { ...meta(ws), reason: "stalled", queued: q, stalledMs: now - data.stallSince });
+				closeSocket(ws, CLOSE_SLOW, "slow consumer");
+			}
+			data.lastQueued = q;
+			data.lastSent = data.sentBytes;
+		}
 	}
 
 	/** Upgrades accepted but not yet open: they count against the connection cap, so a burst cannot get past it. */
@@ -731,7 +753,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			const room = roomRequest(url);
 			if (!room) return text(404, "not found");
 			if (room.role !== "host") return text(403, "host listener: browsers use the guest listener");
-			const data: SocketData = { listener: "host", ...room, peerId: 0, device: "", connectedAt: 0, ua: "", closing: false };
+			const data: SocketData = { listener: "host", ...room, peerId: 0, device: "", connectedAt: 0, ua: "", closing: false, sentBytes: 0, lastQueued: 0, lastSent: 0, stallSince: 0 };
 			if (!admit()) return text(503, "too many connections");
 			if (srv.upgrade(req, { data })) return undefined;
 			upgrading--;
@@ -771,7 +793,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			const room = roomRequest(url);
 			if (!room) return text(404, "not found");
 			if (room.role !== "guest") return text(403, "guest listener: hosts use the loopback listener");
-			const data: SocketData = { listener: "guest", ...room, peerId: 0, device: gate.device, connectedAt: 0, ua: (req.headers.get("user-agent") ?? "").replace(/[^\x20-\x7e]/g, "").slice(0, 120), closing: false };
+			const data: SocketData = { listener: "guest", ...room, peerId: 0, device: gate.device, connectedAt: 0, ua: (req.headers.get("user-agent") ?? "").replace(/[^\x20-\x7e]/g, "").slice(0, 120), closing: false, sentBytes: 0, lastQueued: 0, lastSent: 0, stallSince: 0 };
 			if (!admit()) return text(503, "too many connections");
 			if (srv.upgrade(req, { data })) return undefined;
 			upgrading--;
@@ -799,6 +821,10 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		}
 	}, limits.recheckMs);
 
+	const stallTimer = limits.stallMs > 0
+		? setInterval(() => checkStalls(Date.now()), Math.max(250, Math.min(5_000, Math.floor(limits.stallMs / 4))))
+		: null;
+
 	log("listening", {
 		adapter: auth.name,
 		host: `ws://${LOOPBACK}:${hostServer.port}`,
@@ -813,6 +839,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		guestPort: guestServer.port as number,
 		stop(): void {
 			clearInterval(recheck);
+			if (stallTimer) clearInterval(stallTimer);
 			adapterRun.stop();
 			for (const room of rooms.values()) {
 				const closure = JSON.stringify({ t: "room-closed" });

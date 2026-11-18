@@ -5,6 +5,8 @@ All notable changes to `omp-private-relay`. The protocols it implements have the
 
 ## Unreleased
 
+- Guests are cut after 30 seconds without drain progress or when queue memory budgets are exceeded; the defaults are 256 MiB per connection and 1 GiB relay-wide.
+
 - The pinned 18.18 web asset is unchanged and predates the 4409 terminal-close patch. Rebuild locally with the current
   patch for that behavior; the 18.19 patch also supports local builds. `init` preserves intact current local builds of
   the matching minor. `/stats` reports local build provenance and advertises `viewers2` only for an intact local build

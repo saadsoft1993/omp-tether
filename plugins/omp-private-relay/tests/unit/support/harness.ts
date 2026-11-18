@@ -393,6 +393,28 @@ export interface RawGuest {
 	destroy(): void;
 }
 
+/** Parse complete unmasked server frames, retaining any partial frame. */
+export function parseServerFrames(buf: Buffer, onFrame: (opcode: number, payloadLength: number) => void): Buffer {
+	while (buf.length >= 2) {
+		const op = (buf[0] as number) & 0x0f;
+		let len = (buf[1] as number) & 0x7f;
+		let off = 2;
+		if (len === 126) {
+			if (buf.length < 4) break;
+			len = buf.readUInt16BE(2);
+			off = 4;
+		} else if (len === 127) {
+			if (buf.length < 10) break;
+			len = Number(buf.readBigUInt64BE(2));
+			off = 10;
+		}
+		if (buf.length < off + len) break;
+		onFrame(op, len);
+		buf = buf.subarray(off + len);
+	}
+	return buf;
+}
+
 /** A paired guest that never answers the relay's close frame and keeps sending: a hostile client. */
 export async function rawGuest(relay: Relay, room: string): Promise<RawGuest> {
 	const sock = net.connect(relay.guestPort, "127.0.0.1");
@@ -414,24 +436,7 @@ export async function rawGuest(relay: Relay, room: string): Promise<RawGuest> {
 			buf = buf.subarray(end + 4);
 			upgraded.resolve();
 		}
-		// Server frames are unmasked; look for a close opcode at any frame start we can parse.
-		while (buf.length >= 2) {
-			const op = (buf[0] as number) & 0x0f;
-			let len = (buf[1] as number) & 0x7f;
-			let off = 2;
-			if (len === 126) {
-				if (buf.length < 4) break;
-				len = buf.readUInt16BE(2);
-				off = 4;
-			} else if (len === 127) {
-				if (buf.length < 10) break;
-				len = Number(buf.readBigUInt64BE(2));
-				off = 10;
-			}
-			if (buf.length < off + len) break;
-			if (op === 0x8) sawClose = true;
-			buf = buf.subarray(off + len);
-		}
+		buf = parseServerFrames(buf, op => { if (op === 0x8) sawClose = true; });
 	});
 	sock.on("close", () => {
 		isClosed = true;
@@ -448,4 +453,41 @@ export async function rawGuest(relay: Relay, room: string): Promise<RawGuest> {
 		closed: () => isClosed,
 		destroy: () => sock.destroy(),
 	};
+}
+
+/** A paired guest that reads at a bounded rate while parsing incoming frames. */
+export async function throttledGuest(relay: Relay, room: string, bytesPerTick: number, tickMs: number): Promise<{ frames(): number; bytes(): number; closed(): boolean; destroy(): void }> {
+	const sock = net.connect(relay.guestPort, "127.0.0.1");
+	const upgraded = Promise.withResolvers<void>();
+	let buf = Buffer.alloc(0);
+	let headDone = false;
+	let count = 0;
+	let total = 0;
+	let windowBytes = 0;
+	let isClosed = false;
+	const timer = setInterval(() => { windowBytes = 0; sock.resume(); }, tickMs);
+	sock.on("data", chunk => {
+		windowBytes += chunk.length;
+		if (windowBytes >= bytesPerTick) sock.pause();
+		buf = Buffer.concat([buf, chunk as Buffer]);
+		if (!headDone) {
+			const end = buf.indexOf("\r\n\r\n");
+			if (end < 0) return;
+			if (!buf.subarray(0, 12).toString("latin1").includes("101")) {
+				upgraded.reject(new Error("upgrade refused"));
+				sock.destroy();
+				return;
+			}
+			headDone = true;
+			buf = buf.subarray(end + 4);
+			upgraded.resolve();
+		}
+		buf = parseServerFrames(buf, (op, len) => { if (op === 0x2) { count++; total += len; } });
+	});
+	sock.on("close", () => { isClosed = true; clearInterval(timer); });
+	sock.on("error", err => { upgraded.reject(err); });
+	const h = { ...guestHeaders(relay), ...WS_HEADERS };
+	sock.write([`GET /r/${room}?role=guest HTTP/1.1`, ...Object.entries(h).map(([k, v]) => `${k}: ${v}`), "", ""].join("\r\n"));
+	await upgraded.promise;
+	return { frames: () => count, bytes: () => total, closed: () => isClosed, destroy: () => { clearInterval(timer); sock.destroy(); } };
 }
