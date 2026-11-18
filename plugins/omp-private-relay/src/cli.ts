@@ -17,7 +17,7 @@ import { fetchProvenStats, proveListener, readCheckKey } from "./listener-check"
 import { PairingError, PairingWriter } from "./pairing-store";
 import { configDir, pluginRoot } from "./paths";
 import { envForBun, envForOmp, findOmp, minorOf, probeOmp } from "./runtime";
-import { assetUrl, download, type Fetcher, inspectInstalled, installTree, type InstalledBuild, loadWebBuilds, MAX_ASSET_BYTES, readTree, sha256, treeHash, verifyAsset, WebAssetError, type WebBuilds } from "./web-asset";
+import { assetUrl, download, type Fetcher, inspectInstalled, installTree, type InstalledBuild, loadWebBuilds, LOCAL_BUILD_ASSET, MAX_ASSET_BYTES, readTree, sha256, treeHash, verifyAsset, WebAssetError, type WebBuilds } from "./web-asset";
 
 type Env = Record<string, string | undefined>;
 
@@ -285,6 +285,10 @@ async function installWeb(config: Config, ompVersion: string, args: Args, env: E
 	}
 	const build = builds.builds[minor];
 	const have = inspectInstalled(config.web.dir);
+	if (have.state === "ok" && have.meta.asset === LOCAL_BUILD_ASSET && have.meta.localPatchVersion === 1 && typeof have.meta.ompTag === "string" && minorOf(have.meta.ompTag.replace(/^v/, "")) === minor) {
+		io.out(`locally built web client for omp ${minor} is already installed in ${config.web.dir}\n`);
+		return "ok";
+	}
 	if (have.state === "ok" && build && have.meta.treeSha256 === build.treeSha256 && have.meta.noticeSha256 === build.noticeSha256) {
 		io.out(`web client for omp ${minor} is already installed in ${config.web.dir}\n`);
 		return "ok";
@@ -484,8 +488,8 @@ async function cmdRebuild(args: Args, env: Env, io: Io, deps: CliDeps): Promise<
 		const minor = minorOf(tag.replace(/^v/, ""));
 		const pinned = loadWebBuilds().builds[minor];
 		const bunVersion = Bun.spawnSync([ompBin, "--version"], { stdout: "pipe", env: envForBun(env) }).stdout.toString().trim();
-		const meta: InstalledBuild = { ompTag: tag, bun: bunVersion, treeSha256: hash, noticeSha256: sha256(notice), asset: "(built locally)", installedAt: "" };
-		installTree(files, { ompTag: tag, bun: bunVersion, asset: meta.asset, sha256: "", treeSha256: hash, noticeSha256: sha256(notice), bytes: 0, files: files.size }, config.web.dir);
+		const meta: InstalledBuild = { ompTag: tag, bun: bunVersion, treeSha256: hash, noticeSha256: sha256(notice), asset: LOCAL_BUILD_ASSET, installedAt: "" };
+		installTree(files, { ompTag: tag, bun: bunVersion, asset: meta.asset, localPatchVersion: 1, sha256: "", treeSha256: hash, noticeSha256: sha256(notice), bytes: 0, files: files.size }, config.web.dir);
 		io.out(`built ${tag} with Bun ${bunVersion} and installed it in ${config.web.dir}\n`);
 		io.out(pinned ? (pinned.treeSha256 === hash ? "content hash matches the build this plugin pins\n" : "content hash differs from the build this plugin pins (expected when the omp patch level or Bun differs)\n") : "this plugin version pins no build for that omp minor\n");
 		return 0;

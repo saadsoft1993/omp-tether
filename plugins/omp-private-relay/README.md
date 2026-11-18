@@ -17,7 +17,8 @@ browsers that **you** paired in.
   relay reads) and [`relay-check/1`](../../docs/protocol/relay-check-1.md) (proof that a port is really this relay), each
   with tests that any implementation can run.
 
-Supported: macOS and Linux, omp 18.18.x (tested on 18.18.0 and 18.18.3), one trusted user account. Not supported:
+Supported: macOS and Linux, omp 18.18.x (tested on 18.18.0 and 18.18.3), one trusted user account. A local build
+path is also provided for omp 18.19.x; it has not been release-tested. Not supported:
 Windows; machines that several people share (see [Who this protects against](#who-this-protects-against)).
 
 ## What you need
@@ -207,31 +208,40 @@ Environment variables beat the file, which beats the defaults. Other variables r
 `OMP_SRC` (the omp checkout for `rebuild-web`) and `OMP_PRIVATE_RELAY_ASSET_BASE` (a mirror of the release assets; `https`,
 or `http` to loopback). Directories follow `XDG_CONFIG_HOME` and `XDG_DATA_HOME`.
 
-Close codes a browser can see: **4401** not paired (final: no retry), **4008** too slow (it reconnects), **4029** room
-or relay full, **4001** room closed or not back yet (it retries), **4004** no such room, **4009** a host is already
-connected for that room.
+Close codes a browser can see: **4401** not paired (final: no retry), **4409** disconnected by owner (final with the
+current locally built client), **4008** too slow (it reconnects), **4029** room or relay full, **4001** room closed or
+not back yet (it retries), **4004** no such room, **4009** a host is already connected for this room.
 
 ## Web client
 
-omp's browser client (collab-web) is a private package of omp's repository, so it cannot be installed from npm. This
-plugin ships **a patched build per omp minor** (`18.18` for 18.18.x) as a release asset,
-`omp-private-relay-web-<minor>.tar`, pinned in [`web-builds.json`](web-builds.json) by two hashes: of the archive, and of
-its content. `init` downloads it, checks both before writing a file, refuses anything but plain files with plain names,
+omp's browser client (collab-web) is a private package of omp's repository, so it cannot be installed from npm. The
+published release currently pins an `18.18` asset in [`web-builds.json`](web-builds.json) by two hashes: of the archive,
+and of its content. It does not yet pin an 18.19 asset. `init` downloads a pinned asset, checks both hashes before writing a
+file, refuses anything but plain files with plain names,
 and installs it with a staged directory and two renames in `~/.local/share/omp-private-relay/web/current` (a crash between the renames leaves the old copy aside; the next install or `rebuild-web` puts it back). `doctor` recomputes the content hash, so a
 damaged or edited copy is noticed.
 
-The patch ([`patches/`](patches)) makes three changes: a link that names the loopback relay connects back to the page's
-own address (`wss://` behind Serve, `ws://` on loopback http), close codes 4401 (unpaired) and 4409 (disconnected by
-the host) show a message and are final, and omp's third-party analytics script is removed. A 4409 disconnect is a soft
-kick: the browser will not reconnect automatically, but reloading still works while it remains paired. To revoke access,
-unpair the browser as well. The build is reproducible: the same omp tag built with the same Bun gives the same content
-hash. Licences of the bundled code are in [`NOTICE`](NOTICE).
+The current source patches ([`patches/`](patches)) rewrite loopback links to the page's address (`wss://` behind Serve,
+`ws://` on loopback http), make close codes 4401 (unpaired) and 4409 (disconnected by the host) final with a message,
+and remove omp's third-party analytics script. **The pinned 18.18 release asset predates the 4409 patch**: it does not
+provide the terminal 4409 behavior. A local rebuild using the current patch does. Disconnect is a soft kick even with that
+patch: reloading still works while the browser remains paired. To revoke access, unpair the browser as well. The same omp
+tag built with the same Bun gives the same content hash. Licences of the bundled code are in [`NOTICE`](NOTICE).
 
-If your omp is a minor the plugin has no build for, build it yourself from a checkout of omp that has the release tags:
+For omp 18.19, first run `omp-private-relay init --yes --skip-web` to create the config without attempting a download.
+From a trusted omp checkout containing the matching release tag, build and install the patched client:
 
-```
+```sh
 omp-private-relay rebuild-web --omp-src ~/src/oh-my-pi --tag v18.19.0
+omp-private-relay init --yes
 ```
+
+Use the tag matching the installed omp release. The second `init` keeps an intact local build of the matching minor made
+with the current patch checks; rebuild older local installs first. The default install directory is
+`~/.local/share/omp-private-relay/web/current`; a configured `web.dir` overrides it. On the host listener `/stats`,
+`build.localBuild: true` marks a local build and `build.localPatchVersion: 1` marks the current patch checks. These fields
+describe the install record, not independent verification of its source or the running process. A local build is not a
+pinned release asset.
 
 It exports the tag with `git archive` (your checkout is only read), applies `patches/collab-web-<minor>.patch`, builds on
 omp's embedded Bun through a small `bun` shim, checks that the patch took effect, and installs the result. It needs
@@ -247,7 +257,9 @@ expected device8 before closing. Nonces are unique and timestamps are fresh with
 404/409 errors carry `X-Relay-Admin-Proof`, an HMAC over `relay-admin-resp\n<operation>\n<nonce>\n<SHA256 of response bytes>`.
 Signed error bodies include the HTTP status. Browser-origin and forwarded requests are refused. `/viewers` includes room
 IDs, peer numbers, truncated device hashes and user agents, plus `pairingMode` (`own` or `hub`) and the resolved
-`pairingStore` path (or null if it cannot be resolved). `/stats` also reports the mode but is unauthenticated. `hub`
+`pairingStore` path (or null if it cannot be resolved). `/stats` is unauthenticated and advertises `viewers2` only when
+the served tree passes its recorded integrity checks and carries the current local patch marker. The pinned 18.18 asset
+and older local builds do not advertise it. `hub`
 means the relay is configured in `shared` mode, not that it has proved which application owns the store: an admin must
 verify the authenticated store path against its own before unpairing. In `own` mode, use `omp-private-relay revoke` to
 unpair. Disconnect alone closes the viewer with 4409 and does not revoke its cookie; a reload can reconnect.

@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readTree, sha256, treeHash } from "../../src/web-asset";
 import { closedWithin, guestHeaders, guestPeer, hostPeer, makeRoomId, rawRequest, startRelay, stats, waitUntil, type Relay } from "./support/harness";
 
 describe("host relay admin", () => {
@@ -55,7 +56,7 @@ describe("host relay admin", () => {
 			expect(viewer.connectedAt).toBeGreaterThan(0);
 		}
 		expect(body.lastAdmittedAt[device8]).toBeGreaterThan(0);
-		expect((await stats(relay)).capabilities).toEqual(["viewers"]);
+		expect((await stats(relay)).capabilities).toEqual([]);
 		expect((await stats(relay)).pairingMode).toBe("own");
 		const target = body.viewers.find((v: { ua: string }) => v.ua === "viewer one");
 		const mismatchRequest = signed("disconnect", room, String(target.peer), undefined, undefined, relay, device8 === "00000000" ? "00000001" : "00000000");
@@ -81,6 +82,33 @@ describe("host relay admin", () => {
 		expect(remaining.lastAdmittedAt[device8]).toBe(body.lastAdmittedAt[device8]);
 		second.ws.close();
 		host.ws.close();
+	});
+
+	test("stats advertises viewers2 only for an intact current local build", async () => {
+		const record = path.join(relay.webDir, ".omp-private-relay-build.json");
+		const notice = path.join(relay.webDir, "NOTICE");
+		const index = path.join(relay.webDir, "index.html");
+		const original = fs.readFileSync(index);
+		try {
+			fs.writeFileSync(notice, "notice");
+			const meta = { ompTag: "v18.19.0", bun: "1.4.4", asset: "(built locally)", treeSha256: treeHash(readTree(relay.webDir)), noticeSha256: sha256("notice") };
+			fs.writeFileSync(record, JSON.stringify(meta));
+			expect((await stats(relay)).build).toEqual({ ompTag: "v18.19.0", bun: "1.4.4", localBuild: true, localPatchVersion: null });
+			expect((await stats(relay)).capabilities).toEqual([]);
+			expect((await stats(relay)).webClientNeedsRebuild).toBe(true);
+			fs.writeFileSync(record, JSON.stringify({ ...meta, localPatchVersion: 1 }));
+			expect((await stats(relay)).capabilities).toEqual(["viewers2"]);
+			expect((await stats(relay)).webClientNeedsRebuild).toBe(false);
+			fs.writeFileSync(index, "modified");
+			expect((await stats(relay)).capabilities).toEqual([]);
+			fs.writeFileSync(record, JSON.stringify({ ...meta, asset: "private-path", localPatchVersion: 1 }));
+			expect((await stats(relay)).build).toEqual({ ompTag: "v18.19.0", bun: "1.4.4", localBuild: false, localPatchVersion: 1 });
+			expect((await stats(relay)).capabilities).toEqual([]);
+		} finally {
+			fs.writeFileSync(index, original);
+			fs.rmSync(record, { force: true });
+			fs.rmSync(notice, { force: true });
+		}
 	});
 
 	test("shared pairing is reported as hub in stats and the authenticated viewers response", async () => {

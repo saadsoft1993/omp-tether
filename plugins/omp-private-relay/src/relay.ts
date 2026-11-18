@@ -33,6 +33,7 @@ import { CHECK_PREFIX, readCheckKey } from "./listener-check";
 import { DEVICES_FILE, PairingError, PairingReader, PairingWriter } from "./pairing-store";
 import { PAIR_JS, PAIR_PAGE } from "./pair-page";
 import { trustWalk } from "./trustwalk";
+import { inspectInstalled, LOCAL_BUILD_ASSET } from "./web-asset";
 
 /** The only address either listener ever binds. */
 export const LOOPBACK = "127.0.0.1";
@@ -666,11 +667,21 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		} catch {
 			// not installed by init
 		}
+		let viewers2 = false;
+		if (root !== null) {
+			try {
+				const installed = inspectInstalled(root);
+				viewers2 = installed.state === "ok" && installed.meta.asset === LOCAL_BUILD_ASSET && installed.meta.localPatchVersion === 1;
+			} catch {
+				// An unreadable or changing tree cannot prove support.
+			}
+		}
 		return JSON.stringify({
 			...stats,
 			adapter: auth.name,
 			pairingMode: pairingOwn ? "own" : "hub",
-			capabilities: ["viewers"],
+			capabilities: viewers2 ? ["viewers2"] : [],
+			webClientNeedsRebuild: !viewers2,
 			rooms: rooms.size,
 			guests,
 			sockets: sockets.size,
@@ -678,7 +689,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			uptimeS: Math.round((Date.now() - startedAt) / 1000),
 			inRestartGrace: Date.now() - startedAt < limits.restartGraceMs,
 			staticReady: staticReady(),
-			build: build && typeof build === "object" ? { ompTag: (build as Record<string, unknown>).ompTag ?? null, bun: (build as Record<string, unknown>).bun ?? null } : null,
+			build: build && typeof build === "object" ? { ompTag: (build as Record<string, unknown>).ompTag ?? null, bun: (build as Record<string, unknown>).bun ?? null, localBuild: (build as Record<string, unknown>).asset === LOCAL_BUILD_ASSET, localPatchVersion: (build as Record<string, unknown>).localPatchVersion === 1 ? 1 : null } : null,
 			ready: auth.ready(),
 			limits: { ...limits },
 		});

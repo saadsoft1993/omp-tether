@@ -42,8 +42,9 @@ hashes and user agents; anyone who can read the check key can access it. `/stats
 authentication, so an administrator must use the authenticated `/viewers` mode and resolved pairing-store path, and
 compare the path to its own store before unpairing. Shared mode alone does not establish store ownership.
 
-Disconnect closes a viewer with 4409, which the patched client treats as terminal, but it does not revoke the cookie.
-Reloading reconnects a still-paired browser. Revocation is separate; in own mode use `omp-private-relay revoke`.
+Disconnect closes a viewer with 4409 but does not revoke the cookie. Current locally built patched clients treat 4409 as
+terminal; the pinned 18.18 asset predates that patch and does not. Reloading reconnects a still-paired browser. Revocation
+is separate; in own mode use `omp-private-relay revoke`.
 
 ## Threats and what answers them
 

@@ -3,6 +3,13 @@
 All notable changes to `omp-private-relay`. The protocols it implements have their own numbers (`pairing-store/1`,
 `relay-check/1`) and change only by spec; see `docs/protocol/` in the repository.
 
+## Unreleased
+
+- The pinned 18.18 web asset is unchanged and predates the 4409 terminal-close patch. Rebuild locally with the current
+  patch for that behavior; the 18.19 patch also supports local builds. `init` preserves intact current local builds of
+  the matching minor. `/stats` reports local build provenance and advertises `viewers2` only for an intact local build
+  carrying the current patch marker; older local builds must be rebuilt.
+
 ## 0.1.2 (2026-11-12)
 
 The web client asset is unchanged (`omp-private-relay-web-18.18.tar`, same pin, still published with the `omp-private-relay-v0.1.0` release).
