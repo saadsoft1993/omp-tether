@@ -8,7 +8,7 @@
 //
 // Groups (read-only checks always run):
 //   --mutate      also run abort and rename against the session (rename changes the session name)
-//   --exclusive   also run checks that need every client slot free (the 4-client limit)
+//   --exclusive   also run checks that need every client slot free (the client limit and reserved stop slot)
 //   --idle-ms N   also check that a silent connection is closed after about N milliseconds
 //   --off-switch  also create and remove the `off` file in the directory (closes the listener, then it comes back)
 // Exit code 0: every check passed. 1: a check failed. 2: usage error or no session found.
@@ -446,7 +446,7 @@ export async function runConformance(opts: Options): Promise<CheckResult[]> {
 
 	// ---- optional groups --------------------------------------------------------------------------------------------
 	if (opts.exclusive) {
-		await check("L1", "a fifth simultaneous client gets too_many_clients and is closed", async () => {
+		await check("L1", "ordinary clients are bounded and the optional stop slot is reserved", async () => {
 			const held: Conn[] = [];
 			try {
 				for (let i = 0; i < 4; i++) {
@@ -465,9 +465,18 @@ export async function runConformance(opts: Options): Promise<CheckResult[]> {
 				}
 				const fifth = await open();
 				try {
-					const r = await fifth.next();
-					expect(r && r.ok === false && r.code === "too_many_clients", JSON.stringify(r));
-					expect(await fifth.waitClosed(3000), "fifth connection still open");
+					const r = await snap(fifth, "reserved");
+					if (r?.ok === true) {
+						const sixth = await open();
+						try {
+							const denied = await sixth.next();
+							expect(denied?.code === "too_many_clients", JSON.stringify(denied));
+						} finally {
+							sixth.close();
+						}
+					} else {
+						expect(r && r.ok === false && r.code === "too_many_clients", JSON.stringify(r));
+					}
 				} finally {
 					fifth.close();
 				}

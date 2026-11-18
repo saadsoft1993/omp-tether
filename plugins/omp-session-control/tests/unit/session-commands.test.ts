@@ -182,6 +182,8 @@ describe("session-info", () => {
 		expect((await info()).goal).toEqual({ objective: "ship safely", tokenBudget: 1200 });
 		goal.objective = "é".repeat(5000);
 		expect((await info()).goal).toBeNull();
+		goal.objective = "x\ud800";
+		expect((await info()).goal).toBeNull();
 	});
 
 	test("a model without reasoning has no thinking levels; no model is null", async () => {
@@ -748,6 +750,7 @@ describe("set-mode", () => {
 			{ mode: "goal", action: "enter", objective: "   " },
 			{ mode: "goal", action: "enter", objective: 4 },
 			{ mode: "goal", action: "enter", objective: "x".repeat(2001) },
+			{ mode: "goal", action: "enter", objective: "x\ud800" },
 			{ mode: "plan", action: "enter", objective: "hi" },
 			{ mode: "goal", action: "pause", objective: "hi" },
 			{ mode: 1, action: "enter" },

@@ -98,7 +98,8 @@ same ID inside that window; delivery outside the window cannot be deduplicated.
 
 `plan-notes` needs omp 18.19 or newer and returns after approval with the notes pending. It waits for the matching
 synthetic approved-plan prompt, then sends the notes. The first message in the target session must be that prompt;
-an intervening user input or another switch cancels the send. Disabling control also cancels it. Delivery not
+an intervening user input or another switch cancels a send that has not started. Disabling control also cancels an
+unsent message, but cannot cancel a send already in flight; its admission outcome is retained. Delivery not
 confirmed within five seconds is uncertain; check the session before retrying. A cancelled manual compaction has no
 extension completion event; pending notes are cleared on the next user input or session switch, or after 30 minutes.
 

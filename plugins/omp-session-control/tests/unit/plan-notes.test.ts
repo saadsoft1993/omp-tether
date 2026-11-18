@@ -159,7 +159,7 @@ test("an unseen cancelled approval releases its path after 30 minutes", async ()
 });
 
 
-test("disabling during an in-flight admission preserves cancellation", async () => {
+test("disabling during an in-flight admission preserves its outcome", async () => {
 	const gate = Promise.withResolvers<void>();
 	host.pi.sendUserMessage = (text: string) => { host.messages.push(text); return gate.promise; };
 	const review = await host.openReview();
@@ -173,7 +173,7 @@ test("disabling during an in-flight admission preserves cancellation", async () 
 	await host.waitFor(() => host.registry(), "control reopened");
 	client.close();
 	({ client, nonce, sessionId, generation } = await Client.toHost(host));
-	expect((await info()).planNotes).toMatchObject({ state: "failed", reason: "control disabled" });
+	expect((await info()).planNotes).toMatchObject({ state: "sent" });
 });
 
 test("manual compaction cancellation has no end hook and input clears the guard", async () => {
@@ -226,4 +226,82 @@ test("ordinary plan-answer cannot bypass a pending same-path approval", async ()
 	const second = await host.openReview();
 	expect((await call("plan-answer", { reviewId: second.reviewId, choice: "keep" })).code).toBe("busy");
 	expect(host.resolveCalls).toHaveLength(1);
+});
+
+
+test("ordinary cancelled compact releases its guard on input", async () => {
+	const review = await host.openReview();
+	expect((await call("plan-answer", { reviewId: review.reviewId, choice: "compact" })).ok).toBe(true);
+	await host.emit("session_before_compact", {});
+	await host.emit("input", { source: "interactive", text: "continue" });
+	const next = await host.openReview();
+	expect((await call("plan-notes", { reviewId: next.reviewId, choice: "keep", notes: "new", requestId: "ordinary-cancel" })).result).toMatchObject({ approved: true, notes: "pending" });
+});
+
+test("ordinary cancelled compact releases its guard on switch", async () => {
+	const review = await host.openReview();
+	await call("plan-answer", { reviewId: review.reviewId, choice: "compact" });
+	host.sessionId = "01a1b65b-2222-7000-8000-000000000002";
+	await host.emit("session_switch", { reason: "new" });
+	const target = { sessionId: host.sessionId, generation: host.registry()!.data.generation as number };
+	const next = await host.openReview();
+	expect((await call("plan-notes", { reviewId: next.reviewId, choice: "keep", notes: "new", requestId: "ordinary-switch" }, target)).result).toMatchObject({ approved: true, notes: "pending" });
+});
+
+
+test("uncertain in-flight notes become sent when admission later settles", async () => {
+	const gate = Promise.withResolvers<void>();
+	const original = host.ctx.setTimeout;
+	host.ctx.setTimeout = (cb, ms) => original(cb, ms === 5000 ? 20 : ms);
+	host.pi.sendUserMessage = () => gate.promise;
+	const review = await host.openReview();
+	await call("plan-notes", { reviewId: review.reviewId, choice: "keep", notes: "notes", requestId: "late" });
+	await host.emit("message_start", prompt());
+	await new Promise(resolve => setTimeout(resolve, 50));
+	expect((await info()).planNotes.state).toBe("uncertain");
+	gate.resolve();
+	await new Promise(resolve => setTimeout(resolve, 10));
+	expect((await info()).planNotes).toMatchObject({ state: "sent" });
+});
+
+
+test("ordinary execute retains same-path guard during its first new-session handoff", async () => {
+	const first = await host.openReview();
+	await call("plan-answer", { reviewId: first.reviewId, choice: "execute" });
+	host.sessionId = "01a1b65b-2222-7000-8000-000000000002";
+	await host.emit("session_switch", { reason: "new" });
+	const target = { sessionId: host.sessionId, generation: host.registry()!.data.generation as number };
+	const second = await host.openReview();
+	expect((await call("plan-notes", { reviewId: second.reviewId, choice: "keep", notes: "private", requestId: "during-execute" }, target)).result).toMatchObject({ approved: false, notes: "failed", reason: "another approval of this plan is still starting" });
+	await host.emit("message_start", prompt());
+	expect(host.messages).toEqual([]);
+});
+
+
+test("admission racing the deadline does not leave stale uncertain status", async () => {
+	const gate = Promise.withResolvers<void>();
+	const original = host.ctx.setTimeout;
+	host.ctx.setTimeout = (cb, ms) => original(ms === 5000 ? () => { cb(); gate.resolve(); } : cb, ms === 5000 ? 20 : ms);
+	host.pi.sendUserMessage = () => gate.promise;
+	const review = await host.openReview();
+	await call("plan-notes", { reviewId: review.reviewId, choice: "keep", notes: "notes", requestId: "deadline-race" });
+	await host.emit("message_start", prompt());
+	await new Promise(resolve => setTimeout(resolve, 50));
+	expect((await info()).planNotes).toMatchObject({ state: "sent" });
+});
+
+
+test("plan notes request ID cannot be reused with different text", async () => {
+	const review = await host.openReview();
+	const args = { reviewId: review.reviewId, choice: "keep", notes: "original", requestId: "same-id" };
+	expect((await call("plan-notes", args)).ok).toBe(true);
+	expect((await call("plan-notes", { ...args, notes: "changed" })).code).toBe("invalid_args");
+});
+
+
+test("notes IDs distinguish lone UTF-16 surrogates", async () => {
+	const review = await host.openReview();
+	const args = { reviewId: review.reviewId, choice: "keep", notes: "x\ud800", requestId: "surrogates" };
+	expect((await call("plan-notes", args)).ok).toBe(true);
+	expect((await call("plan-notes", { ...args, notes: "x\ud801" })).code).toBe("invalid_args");
 });

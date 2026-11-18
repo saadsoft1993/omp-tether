@@ -218,6 +218,59 @@ describe("operations", () => {
 		expect((await pending).result).toEqual({ state: "admitted" });
 	});
 
+	test("in-flight message receipt survives control being disabled", async () => {
+		const gate = Promise.withResolvers<void>();
+		host.pi.sendUserMessage = (text: string) => { host.messages.push(text); return gate.promise; };
+		c.send(frame(1, "send-message", { text: "hello", messageId: "disable-race" }));
+		await host.waitFor(() => host.messages.length === 1, "send started");
+		fs.writeFileSync(path.join(host.dir, "off"), "");
+		await host.waitFor(() => !host.registry(), "control closed");
+		gate.resolve();
+		fs.unlinkSync(path.join(host.dir, "off"));
+		await host.waitFor(() => host.registry(), "control reopened");
+		c.close();
+		({ client: c, nonce, sessionId, generation } = await Client.toHost(host));
+		expect((await c.request(frame(2, "send-status", { messageId: "disable-race" }))).result).toEqual({ state: "admitted" });
+		expect(host.messages).toEqual(["hello"]);
+	});
+
+	test("one ask cannot accept two distinct answers", async () => {
+		await host.emit("tool_execution_start", { toolName: "ask", toolCallId: "question", args: { html: "<form></form>" } });
+		expect((await c.request(frame(1, "ask-answer", { askId: "question", text: "no", messageId: "first" }))).result).toEqual({ state: "admitted" });
+		expect((await c.request(frame(2, "ask-answer", { askId: "question", text: "yes", messageId: "second" }))).code).toBe("question_closed");
+		expect((await c.request(frame(3, "ask-answer", { askId: "question", text: "no", messageId: "first" }))).result).toMatchObject({ state: "admitted", duplicate: true });
+		expect(host.messages).toEqual(["no"]);
+	});
+
+	test("abort has a reserved slot while four sends are pending", async () => {
+		const clients = [c, ...await Promise.all(Array.from({ length: 3 }, () => Client.connect(host.registry()!.data.socket as string)))];
+		host.pi.sendUserMessage = (text: string) => { host.messages.push(text); host.busy = true; return Promise.withResolvers<void>().promise; };
+		for (let i = 0; i < clients.length; i++) clients[i]!.send(frame(`send-${i}`, "send-message", { text: `m${i}`, messageId: `m${i}` }));
+		await host.waitFor(() => host.messages.length === 4, "four sends");
+		const emergency = await Client.connect(host.registry()!.data.socket as string);
+		try {
+			const snapshot = await emergency.request({ v: 1, id: "snapshot", nonce, op: "snapshot" });
+			expect(snapshot.ok).toBe(true);
+			const current = snapshot.result as { sessionId: string; generation: number };
+			expect((await emergency.request({ ...frame("stop", "abort"), ...current })).result).toEqual({ aborted: true });
+		}
+		finally { emergency.close(); for (const other of clients.slice(1)) other.close(); }
+	});
+
+	test("expired ask receipts do not retain or resend answer text", async () => {
+		const now = Date.now;
+		let clock = 1000000;
+		Date.now = () => clock;
+		try {
+			await host.emit("tool_execution_start", { toolName: "ask", toolCallId: "question", args: { html: "<form></form>" } });
+			await c.request(frame(1, "ask-answer", { askId: "question", text: "private", messageId: "answer" }));
+			clock += 15 * 60_000;
+			expect((await c.request(frame(2, "send-status", { messageId: "answer" }))).result).toEqual({ state: "unknown" });
+			expect((await c.request(frame(3, "ask-answer", { askId: "question", text: "private", messageId: "answer" }))).code).toBe("question_closed");
+			expect(host.messages).toEqual(["private"]);
+		} finally { Date.now = now; }
+	});
+
 	test("abort interrupts a busy session once and reports an idle one as not aborted", async () => {
 		host.busy = true;
 		expect((await c.request(frame(1, "abort"))).result).toEqual({ aborted: true });
@@ -316,7 +369,7 @@ describe("connections", () => {
 		for (let i = 0; i < 2; i++) more.push(await Client.connect(host.registry()?.data.socket as string));
 		for (const m of more) expect((await m.request({ v: 1, id: 1, nonce, op: "snapshot" })).ok).toBe(true);
 		const fifth = await Client.connect(host.registry()?.data.socket as string);
-		expect((await fifth.next())?.code).toBe("too_many_clients");
+		expect((await fifth.request(frame("reserved", "session-info"))).code).toBe("too_many_clients");
 		more[0]?.close();
 		await new Promise(r => setTimeout(r, 150));
 		const again = await Client.connect(host.registry()?.data.socket as string);
