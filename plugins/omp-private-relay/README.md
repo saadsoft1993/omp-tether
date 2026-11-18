@@ -221,9 +221,11 @@ and installs it with a staged directory and two renames in `~/.local/share/omp-p
 damaged or edited copy is noticed.
 
 The patch ([`patches/`](patches)) makes three changes: a link that names the loopback relay connects back to the page's
-own address (`wss://` behind Serve, `ws://` on loopback http), close code 4401 shows "this browser is not paired with
-the relay" and is final, and omp's third-party analytics script is removed. The build is reproducible: the same omp tag
-built with the same Bun gives the same content hash. Licences of the bundled code are in [`NOTICE`](NOTICE).
+own address (`wss://` behind Serve, `ws://` on loopback http), close codes 4401 (unpaired) and 4409 (disconnected by
+the host) show a message and are final, and omp's third-party analytics script is removed. A 4409 disconnect is a soft
+kick: the browser will not reconnect automatically, but reloading still works while it remains paired. To revoke access,
+unpair the browser as well. The build is reproducible: the same omp tag built with the same Bun gives the same content
+hash. Licences of the bundled code are in [`NOTICE`](NOTICE).
 
 If your omp is a minor the plugin has no build for, build it yourself from a checkout of omp that has the release tags:
 
@@ -235,6 +237,20 @@ It exports the tag with `git archive` (your checkout is only read), applies `pat
 omp's embedded Bun through a small `bun` shim, checks that the patch took effect, and installs the result. It needs
 network access once for `bun install`, and a patch for that minor; if upstream changed the three files, the patch must be
 rebased.
+
+## Host-side viewer administration
+
+The loopback host listener provides `GET /viewers` and `POST /disconnect` for local administration; the guest listener
+does not expose them. Requests sign `relay-admin\n<operation>\n<room>\n<peer>\n<device8>\n<nonce>\n<time>` with
+HMAC-SHA256 using `checkDir/check.key`. The room, peer and device8 are empty for `/viewers`; `/disconnect` checks the
+expected device8 before closing. Nonces are unique and timestamps are fresh within 30 seconds. Successful replies and
+404/409 errors carry `X-Relay-Admin-Proof`, an HMAC over `relay-admin-resp\n<operation>\n<nonce>\n<SHA256 of response bytes>`.
+Signed error bodies include the HTTP status. Browser-origin and forwarded requests are refused. `/viewers` includes room
+IDs, peer numbers, truncated device hashes and user agents, plus `pairingMode` (`own` or `hub`) and the resolved
+`pairingStore` path (or null if it cannot be resolved). `/stats` also reports the mode but is unauthenticated. `hub`
+means the relay is configured in `shared` mode, not that it has proved which application owns the store: an admin must
+verify the authenticated store path against its own before unpairing. In `own` mode, use `omp-private-relay revoke` to
+unpair. Disconnect alone closes the viewer with 4409 and does not revoke its cookie; a reload can reconnect.
 
 ## The web client's directory is checked
 

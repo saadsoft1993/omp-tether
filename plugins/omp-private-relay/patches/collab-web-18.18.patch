@@ -36,11 +36,12 @@
 +}
 --- a/packages/collab-web/src/lib/socket.ts
 +++ b/packages/collab-web/src/lib/socket.ts
-@@ -15,6 +15,7 @@
+@@ -15,6 +15,8 @@
  	4004: "no such room",
  	4009: "a host is already connected for this room",
  	4029: "room is full",
 +	4401: "this browser is not paired with the relay; pair it again, then reload",
++	4409: "disconnected by the host; reload to reconnect",
  };
  
  const BACKOFF_BASE_MS = 1_000;

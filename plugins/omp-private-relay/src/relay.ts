@@ -30,7 +30,7 @@ import { createAuth, type GuestAuth } from "./auth";
 import type { Config } from "./config";
 import { ensurePrivateDir, readSmallFile, UID } from "./fsutil";
 import { CHECK_PREFIX, readCheckKey } from "./listener-check";
-import { PairingError, PairingReader, PairingWriter } from "./pairing-store";
+import { DEVICES_FILE, PairingError, PairingReader, PairingWriter } from "./pairing-store";
 import { PAIR_JS, PAIR_PAGE } from "./pair-page";
 import { trustWalk } from "./trustwalk";
 
@@ -68,7 +68,6 @@ type RelaySocket = Bun.ServerWebSocket<SocketData>;
 interface Room {
 	host: RelaySocket;
 	guests: Map<number, RelaySocket>;
-	nextPeerId: number;
 }
 
 export interface RelayHandle {
@@ -84,6 +83,9 @@ export interface RelayOptions {
 }
 
 type Gate = { ok: true; device: string } | { ok: false; status: number; reason: string };
+
+// Peer IDs are 32-bit on the wire. Never reuse one in this process, even after a room is recreated.
+let nextPeerId = 1;
 
 export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle {
 	const { limits } = config;
@@ -439,7 +441,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 				closeSocket(ws, CLOSE_FULL, "relay is full");
 				return;
 			}
-			rooms.set(roomId, { host: ws, guests: new Map(), nextPeerId: 1 });
+			rooms.set(roomId, { host: ws, guests: new Map() });
 			log("open", meta(ws));
 			return;
 		}
@@ -455,7 +457,11 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			closeSocket(ws, CLOSE_FULL, "room is full");
 			return;
 		}
-		const peerId = room.nextPeerId++;
+		if (nextPeerId > 0xffff_ffff) {
+			closeSocket(ws, CLOSE_FULL, "peer ids exhausted");
+			return;
+		}
+		const peerId = nextPeerId++;
 		ws.data.peerId = peerId;
 		room.guests.set(peerId, ws);
 		ws.data.connectedAt = Date.now();
@@ -590,42 +596,49 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		if (req.headers.has("x-forwarded-host") || req.headers.has("tailscale-funnel-request")) return text(403, "forbidden");
 		const op = url.pathname === "/viewers" ? "viewers" : "disconnect";
 		if (req.method !== (op === "viewers" ? "GET" : "POST")) return text(405, "method not allowed");
-		const names = ["room", "peer", "nonce", "time", "mac"];
+		const names = ["room", "peer", "device8", "nonce", "time", "mac"];
 		if (names.some(name => url.searchParams.getAll(name).length !== 1) || [...url.searchParams.keys()].some(name => !names.includes(name))) return text(400, "bad request");
 		const room = url.searchParams.get("room") as string;
 		const peer = url.searchParams.get("peer") as string;
+		const device8 = url.searchParams.get("device8") as string;
 		const nonce = url.searchParams.get("nonce") as string;
 		const time = url.searchParams.get("time") as string;
 		const mac = url.searchParams.get("mac") as string;
 		if (!/^[0-9a-f]{32}$/.test(nonce) || !/^(0|[1-9][0-9]*)$/.test(time) || !/^[0-9a-f]{64}$/.test(mac) ||
-			(op === "viewers" ? room !== "" || peer !== "" : !/^[A-Za-z0-9_-]{10,64}$/.test(room) || !/^[1-9][0-9]*$/.test(peer) || !Number.isSafeInteger(Number(peer)))) return text(400, "bad request");
+			(op === "viewers" ? room !== "" || peer !== "" || device8 !== "" : !/^[A-Za-z0-9_-]{10,64}$/.test(room) || !/^[1-9][0-9]*$/.test(peer) || !Number.isSafeInteger(Number(peer)) || !/^[0-9a-f]{8}$/.test(device8))) return text(400, "bad request");
 		const now = Date.now();
 		const timestamp = Number(time);
 		if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > 30_000) return text(403, "forbidden");
 		const key = readCheckKey(config.checkDir);
 		if (!key.ok) return text(503, "admin unavailable");
-		const expected = createHmac("sha256", key.key).update(`relay-admin\n${op}\n${room}\n${peer}\n${nonce}\n${time}`).digest();
+		const expected = createHmac("sha256", key.key).update(`relay-admin\n${op}\n${room}\n${peer}\n${device8}\n${nonce}\n${time}`).digest();
 		if (!timingSafeEqual(expected, Buffer.from(mac, "hex"))) return text(403, "forbidden");
 		for (const [used, expires] of adminNonces) if (expires <= now) adminNonces.delete(used);
 		if (adminNonces.has(nonce)) return text(403, "forbidden");
 		if (adminNonces.size >= 10_000) return text(503, "admin unavailable");
 		adminNonces.set(nonce, now + 120_001);
-		const json = (body: unknown): Response => {
+		const json = (body: unknown, status = 200): Response => {
 			const bytes = Buffer.from(JSON.stringify(body), "utf8");
 			const digest = createHash("sha256").update(bytes).digest("hex");
 			const proof = createHmac("sha256", key.key).update(`relay-admin-resp\n${op}\n${nonce}\n${digest}`).digest("hex");
-			return new Response(bytes, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Relay-Admin-Proof": proof } });
+			return new Response(bytes, { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Relay-Admin-Proof": proof } });
 		};
 		if (op === "viewers") {
 			const viewers = [];
 			for (const [roomId, active] of rooms) for (const [peerId, ws] of active.guests) {
 				if (!ws.data.closing) viewers.push({ room: roomId, peer: peerId, device8: ws.data.device.slice(0, 8), connectedAt: ws.data.connectedAt, ua: ws.data.ua });
 			}
-			return json({ viewers, lastAdmittedAt: Object.fromEntries(lastAdmittedAt) });
+			let pairingStore: string | null = null;
+			try {
+				pairingStore = fs.realpathSync(path.join(config.pairing.dir, DEVICES_FILE));
+			} catch {
+				// An unresolved store cannot be used to authorize unpairing.
+			}
+			return json({ viewers, lastAdmittedAt: Object.fromEntries(lastAdmittedAt), pairingMode: pairingOwn ? "own" : "hub", pairingStore });
 		}
 		const ws = rooms.get(room)?.guests.get(Number(peer));
-		if (!ws || ws.data.closing) return text(404, "viewer not found");
-		const device8 = ws.data.device.slice(0, 8);
+		if (!ws || ws.data.closing) return json({ status: 404, error: "viewer already left" }, 404);
+		if (ws.data.device.slice(0, 8) !== device8) return json({ status: 409, error: "viewer changed" }, 409);
 		closeSocket(ws, 4409, "disconnected by host");
 		return json({ ok: true, device8 });
 	}
@@ -656,6 +669,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		return JSON.stringify({
 			...stats,
 			adapter: auth.name,
+			pairingMode: pairingOwn ? "own" : "hub",
 			capabilities: ["viewers"],
 			rooms: rooms.size,
 			guests,
