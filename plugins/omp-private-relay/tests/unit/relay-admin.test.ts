@@ -84,30 +84,41 @@ describe("host relay admin", () => {
 		host.ws.close();
 	});
 
-	test("stats advertises viewers2 only for an intact current local build", async () => {
-		const record = path.join(relay.webDir, ".omp-private-relay-build.json");
-		const notice = path.join(relay.webDir, "NOTICE");
-		const index = path.join(relay.webDir, "index.html");
+	test("stats caches verified viewers2 support until restart", async () => {
+		const target = await startRelay({ adapter: "token" });
+		const record = path.join(target.webDir, ".omp-private-relay-build.json");
+		const notice = path.join(target.webDir, "NOTICE");
+		const index = path.join(target.webDir, "index.html");
 		const original = fs.readFileSync(index);
 		try {
+			expect((await stats(target)).capabilities).toEqual([]);
 			fs.writeFileSync(notice, "notice");
-			const meta = { ompTag: "v18.19.0", bun: "1.4.4", asset: "(built locally)", treeSha256: treeHash(readTree(relay.webDir)), noticeSha256: sha256("notice") };
+			const meta = { ompTag: "v18.19.0", bun: "1.4.4", asset: "(built locally)", treeSha256: treeHash(readTree(target.webDir)), noticeSha256: sha256("notice") };
 			fs.writeFileSync(record, JSON.stringify(meta));
-			expect((await stats(relay)).build).toEqual({ ompTag: "v18.19.0", bun: "1.4.4", localBuild: true, localPatchVersion: null });
-			expect((await stats(relay)).capabilities).toEqual([]);
-			expect((await stats(relay)).webClientNeedsRebuild).toBe(true);
+			await target.restart();
+			expect((await stats(target)).build).toEqual({ ompTag: "v18.19.0", bun: "1.4.4", localBuild: true, localPatchVersion: null });
+			expect((await stats(target)).capabilities).toEqual([]);
+			expect((await stats(target)).webClientNeedsRebuild).toBe(true);
 			fs.writeFileSync(record, JSON.stringify({ ...meta, localPatchVersion: 1 }));
-			expect((await stats(relay)).capabilities).toEqual(["viewers2"]);
-			expect((await stats(relay)).webClientNeedsRebuild).toBe(false);
+			// A newly installed build does not change a running relay's cached verdict.
+			expect((await stats(target)).capabilities).toEqual([]);
+			await target.restart();
+			expect((await stats(target)).capabilities).toEqual(["viewers2"]);
+			expect((await stats(target)).webClientNeedsRebuild).toBe(false);
 			fs.writeFileSync(index, "modified");
-			expect((await stats(relay)).capabilities).toEqual([]);
-			fs.writeFileSync(record, JSON.stringify({ ...meta, asset: "private-path", localPatchVersion: 1 }));
-			expect((await stats(relay)).build).toEqual({ ompTag: "v18.19.0", bun: "1.4.4", localBuild: false, localPatchVersion: 1 });
-			expect((await stats(relay)).capabilities).toEqual([]);
-		} finally {
+			// Repeated stats do not hash the modified tree; restart re-verifies it.
+			expect((await stats(target)).capabilities).toEqual(["viewers2"]);
+			expect((await stats(target)).capabilities).toEqual(["viewers2"]);
+			await target.restart();
+			expect((await stats(target)).capabilities).toEqual([]);
+			expect((await stats(target)).webClientNeedsRebuild).toBe(true);
 			fs.writeFileSync(index, original);
-			fs.rmSync(record, { force: true });
-			fs.rmSync(notice, { force: true });
+			fs.writeFileSync(record, JSON.stringify({ ...meta, asset: "private-path", localPatchVersion: 1 }));
+			await target.restart();
+			expect((await stats(target)).build).toEqual({ ompTag: "v18.19.0", bun: "1.4.4", localBuild: false, localPatchVersion: 1 });
+			expect((await stats(target)).capabilities).toEqual([]);
+		} finally {
+			await target.stop();
 		}
 	});
 

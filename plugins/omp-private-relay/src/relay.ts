@@ -168,6 +168,20 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		return web;
 	}
 
+	// Capability verification hashes the installed tree once per relay start. Installing or changing the web client
+	// requires a relay restart to refresh the advertised capability.
+	const startupWeb = webState();
+	const verifiedWeb = { root: startupWeb.problem ? null : startupWeb.root, dev: web.dev, ino: web.ino };
+	let verifiedViewers2 = false;
+	if (verifiedWeb.root !== null) {
+		try {
+			const installed = inspectInstalled(verifiedWeb.root);
+			verifiedViewers2 = installed.state === "ok" && installed.meta.asset === LOCAL_BUILD_ASSET && installed.meta.localPatchVersion === 1;
+		} catch {
+			// An unreadable or changing tree cannot prove support.
+		}
+	}
+
 	function buildCsp(html: string): string {
 		const hashes: string[] = [];
 		for (const m of html.matchAll(/<script(?![^>]*\bsrc=)(?![^>]*application\/ld\+json)[^>]*>([\s\S]*?)<\/script>/g)) {
@@ -667,15 +681,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		} catch {
 			// not installed by init
 		}
-		let viewers2 = false;
-		if (root !== null) {
-			try {
-				const installed = inspectInstalled(root);
-				viewers2 = installed.state === "ok" && installed.meta.asset === LOCAL_BUILD_ASSET && installed.meta.localPatchVersion === 1;
-			} catch {
-				// An unreadable or changing tree cannot prove support.
-			}
-		}
+		const viewers2 = verifiedViewers2 && root !== null && root === verifiedWeb.root && web.dev === verifiedWeb.dev && web.ino === verifiedWeb.ino;
 		return JSON.stringify({
 			...stats,
 			adapter: auth.name,
