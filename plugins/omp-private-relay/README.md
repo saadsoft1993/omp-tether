@@ -17,7 +17,7 @@ browsers that **you** paired in.
   relay reads) and [`relay-check/1`](../../docs/protocol/relay-check-1.md) (proof that a port is really this relay), each
   with tests that any implementation can run.
 
-Supported: macOS and Linux, omp 18.18.x (tested on 18.18.0 and 18.18.3), one trusted user account. A local build
+Supported: macOS and Linux, omp 18.18.x and 19.0.x (tested on 18.18.0, 18.18.3 and 19.0.0), one trusted user account. A local build
 path is also provided for omp 18.19.x; it has not been release-tested. Not supported:
 Windows; machines that several people share (see [Who this protects against](#who-this-protects-against)).
 
@@ -217,8 +217,8 @@ not back yet (it retries), **4004** no such room, **4009** a host is already con
 ## Web client
 
 omp's browser client (collab-web) is a private package of omp's repository, so it cannot be installed from npm. The
-published release currently pins an `18.18` asset in [`web-builds.json`](web-builds.json) by two hashes: of the archive,
-and of its content. It does not yet pin an 18.19 asset. `init` downloads a pinned asset, checks both hashes before writing a
+release pins `18.18` and `19.0` assets in [`web-builds.json`](web-builds.json) by two hashes: of the archive
+and of its content. It does not pin an 18.19 asset. `init` downloads a pinned asset, checks both hashes before writing a
 file, refuses anything but plain files with plain names,
 and installs it with a staged directory and two renames in `~/.local/share/omp-private-relay/web/current` (a crash between the renames leaves the old copy aside; the next install or `rebuild-web` puts it back). `doctor` recomputes the content hash, so a
 damaged or edited copy is noticed.

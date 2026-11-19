@@ -1,0 +1,161 @@
+diff --git a/packages/collab-web/index.html b/packages/collab-web/index.html
+index 10fac53..aaf1fa0 100644
+--- a/packages/collab-web/index.html
++++ b/packages/collab-web/index.html
+@@ -73,8 +73,6 @@
+ 			}
+ 		</script>
+ 
+-		<!-- Analytics. data-exclude-hash keeps the E2E room key (URL fragment) out of analytics. -->
+-		<script defer src="https://um.can.ac/script.js" data-website-id="28ab5a7d-3ca4-4c85-9da5-666fa731cb92" data-exclude-hash="true"></script>
+ 	</head>
+ 	<body>
+ 		<div id="root"></div>
+diff --git a/packages/collab-web/src/app.tsx b/packages/collab-web/src/app.tsx
+index a662508..e1cf97b 100644
+--- a/packages/collab-web/src/app.tsx
++++ b/packages/collab-web/src/app.tsx
+@@ -163,6 +163,7 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
+ 				header={snap.header}
+ 				state={snap.state}
+ 				phase={snap.phase}
++				endedReason={snap.endedReason}
+ 				readOnly={snap.readOnly}
+ 				subCount={subCount}
+ 				railOpen={railOpen}
+diff --git a/packages/collab-web/src/components/shell/Banners.tsx b/packages/collab-web/src/components/shell/Banners.tsx
+index 8ac4ee1..d521384 100644
+--- a/packages/collab-web/src/components/shell/Banners.tsx
++++ b/packages/collab-web/src/components/shell/Banners.tsx
+@@ -1,5 +1,6 @@
+ import type { ReactNode } from "react";
+ import type { ConnectionPhase, GuestSnapshot } from "../../lib/client";
++import { disconnectedByHost } from "../../lib/socket";
+ 
+ export interface BannersProps {
+ 	phase: ConnectionPhase;
+@@ -28,11 +29,14 @@ export function Banners({ phase, endedReason, loading, onRejoin, onNewLink }: Ba
+ 		);
+ 	}
+ 	if (phase === "ended") {
++		const kicked = disconnectedByHost(endedReason);
++		const title = kicked ? "Disconnected by the host" : "Session ended";
++		const reason = kicked ? "Reload to reconnect" : endedReason;
+ 		return (
+-			<div className="sh-ended" role="alertdialog" aria-label="session ended">
++			<div className="sh-ended" role="alertdialog" aria-label={title.toLowerCase()}>
+ 				<div className="sh-ended-card">
+-					<div className="sh-ended-title">Session ended</div>
+-					{endedReason && <div className="sh-ended-reason">{endedReason}</div>}
++					<div className="sh-ended-title">{title}</div>
++					{reason && <div className="sh-ended-reason">{reason}</div>}
+ 					<div className="sh-ended-actions">
+ 						<button type="button" className="sh-btn sh-btn-primary" onClick={onRejoin}>
+ 							Rejoin
+diff --git a/packages/collab-web/src/components/shell/HeaderBar.tsx b/packages/collab-web/src/components/shell/HeaderBar.tsx
+index b1f06a9..2d15d92 100644
+--- a/packages/collab-web/src/components/shell/HeaderBar.tsx
++++ b/packages/collab-web/src/components/shell/HeaderBar.tsx
+@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
+ import { memo } from "react";
+ import type { ConnectionPhase } from "../../lib/client";
+ import { fmtPercent, shortenPath } from "../../lib/format";
++import { disconnectedByHost } from "../../lib/socket";
+ import { OmpMark } from "./OmpMark";
+ import { ThemeToggle } from "./ThemeToggle";
+ 
+@@ -19,6 +20,8 @@ export interface HeaderBarProps {
+ 	header: SessionHeader | null;
+ 	state: SessionState | null;
+ 	phase: ConnectionPhase;
++	/** Why the session ended, when it has: a viewer the host disconnected is labelled so, not "Ended". */
++	endedReason?: string | null;
+ 	readOnly: boolean;
+ 	subCount: number;
+ 	railOpen: boolean;
+@@ -31,6 +34,7 @@ export const HeaderBar = memo(function HeaderBar({
+ 	header,
+ 	state,
+ 	phase,
++	endedReason = null,
+ 	readOnly,
+ 	subCount,
+ 	railOpen,
+@@ -67,7 +71,7 @@ export const HeaderBar = memo(function HeaderBar({
+ 			<div className="sh-header-right">
+ 				<span className={`sh-status sh-status-${phase}`} title={`connection: ${phase}`}>
+ 					<span className={`sh-dot sh-dot-${phase}`} />
+-					{PHASE_LABEL[phase]}
++					{phase === "ended" && disconnectedByHost(endedReason) ? "Disconnected" : PHASE_LABEL[phase]}
+ 				</span>
+ 				{readOnly && (
+ 					<span className="sh-chip" title="you joined with a read-only link — watching only">
+diff --git a/packages/collab-web/src/lib/client.ts b/packages/collab-web/src/lib/client.ts
+index caec485..ba219b2 100644
+--- a/packages/collab-web/src/lib/client.ts
++++ b/packages/collab-web/src/lib/client.ts
+@@ -76,11 +76,12 @@ export interface GuestSnapshot {
+ }
+ 
+ const MAX_NOTICES = 50;
+-const TRANSCRIPT_TIMEOUT_MS = 10_000;
+-/** Mirrors the TUI guest's WELCOME_TIMEOUT_MS: a host that never answers hello ends the join. */
+-const WELCOME_TIMEOUT_MS = 30_000;
+-/** Mirrors the TUI guest's SNAPSHOT_PROGRESS_TIMEOUT_MS: every snapshot chunk must make progress. */
+-const SNAPSHOT_PROGRESS_TIMEOUT_MS = 30_000;
++/** Wait 120 s for transcript replies so slow links (around 40 KB/s) can finish. */
++const TRANSCRIPT_TIMEOUT_MS = 120_000;
++/** Wait 120 s for the welcome so slow links (around 40 KB/s) can finish. */
++const WELCOME_TIMEOUT_MS = 120_000;
++/** Wait 120 s for each snapshot chunk so slow links (around 40 KB/s) can finish. */
++const SNAPSHOT_PROGRESS_TIMEOUT_MS = 120_000;
+ /** Commit delay when `requestAnimationFrame` is unavailable (tests, non-DOM hosts). */
+ const FRAME_FALLBACK_MS = 16;
+ 
+diff --git a/packages/collab-web/src/lib/link.ts b/packages/collab-web/src/lib/link.ts
+index 76d8b82..864f783 100644
+--- a/packages/collab-web/src/lib/link.ts
++++ b/packages/collab-web/src/lib/link.ts
+@@ -164,5 +164,21 @@ export function parseCollabLink(link: string): ParsedCollabLink | { error: strin
+ 	}
+ 	const key = secret.subarray(0, ROOM_KEY_BYTES);
+ 	const writeToken = secret.byteLength > ROOM_KEY_BYTES ? secret.subarray(ROOM_KEY_BYTES) : undefined;
+-	return { wsUrl: `${normalized.origin}/r/${roomId}`, roomId, key, writeToken };
++	return { wsUrl: `${guestRelayOrigin(normalized.origin)}/r/${roomId}`, roomId, key, writeToken };
++}
++
++/**
++ * Private relay: hosts reach it on a loopback `ws://` listener, so their links
++ * name that private address. A page served by the relay's own guest listener
++ * connects back to its own origin instead: `wss://` when the page is https
++ * (behind `tailscale serve`), `ws://` when it is plain http on a loopback
++ * address (the relay's `token` adapter).
++ */
++function guestRelayOrigin(origin: string): string {
++	if (typeof location === "undefined") return origin;
++	const url = new URL(origin);
++	if (url.protocol !== "ws:" || !LOCAL_HOSTNAMES[url.hostname]) return origin;
++	if (location.protocol === "https:") return `wss://${location.host}`;
++	if (location.protocol === "http:" && LOCAL_HOSTNAMES[location.hostname]) return `ws://${location.host}`;
++	return origin;
+ }
+diff --git a/packages/collab-web/src/lib/socket.ts b/packages/collab-web/src/lib/socket.ts
+index 5b9482f..60c118a 100644
+--- a/packages/collab-web/src/lib/socket.ts
++++ b/packages/collab-web/src/lib/socket.ts
+@@ -15,8 +15,15 @@ const RELAY_CLOSE_REASONS: Record<number, string> = {
+ 	4004: "no such room",
+ 	4009: "a host is already connected for this room",
+ 	4029: "room is full",
++	4401: "this browser is not paired with the relay; pair it again, then reload",
++	4409: "disconnected by the host; reload to reconnect",
+ };
+ 
++/** Whether a session ended because its host disconnected this viewer (relay close 4409); the session goes on. */
++export function disconnectedByHost(reason: string | null): boolean {
++	return reason === RELAY_CLOSE_REASONS[4409];
++}
++
+ const BACKOFF_BASE_MS = 1_000;
+ const BACKOFF_MAX_MS = 30_000;
+ /** Max enveloped frames buffered while a reconnect is pending; overflow is dropped. */

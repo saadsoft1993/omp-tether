@@ -12,6 +12,16 @@
 			"noticeSha256": "f350105cc3fd276082c5060f3f7fbb65bcc2eff41450f2ac74bce2666a44e906",
 			"bytes": 929280,
 			"files": 23
+		},
+		"19.0": {
+			"ompTag": "v19.0.0",
+			"bun": "1.4.4",
+			"asset": "omp-private-relay-web-19.0.tar",
+			"sha256": "42fe3263575354e0758fc85d50ea568d7d2f8c7ea05888b4c0b83894eb961e7e",
+			"treeSha256": "8eff32dd254165142a8088614ad4467e6fb7ee9b2df3d62a83ca38b681e6889e",
+			"noticeSha256": "f350105cc3fd276082c5060f3f7fbb65bcc2eff41450f2ac74bce2666a44e906",
+			"bytes": 933376,
+			"files": 23
 		}
 	}
 }

@@ -7,7 +7,7 @@
 | | |
 |---|---|
 | Minimum | 18.18.0 |
-| Tested | 18.18.0 |
+| Tested | 18.18.0, 18.19.0, 19.0.0 |
 
 Only a listed version has been run. The extension uses omp's documented extension API for everything it needs, plus two
 omp-internal modules that are loaded optionally (see `ompInternals` in `compat.json`): if either goes away the extension
@@ -18,7 +18,7 @@ against a new omp release before adding that release to `tested`.
 
 ### `omp-private-relay`
 
-Tested with omp 18.18.0 and 18.18.3 (the web client's patch also applies, byte for byte, to the 18.18.0 sources; the pinned build is from v18.18.3). The relay uses omp
+Tested with omp 18.18.0, 18.18.3 and 19.0.0 (the 18.18 web client's patch also applies, byte for byte, to the 18.18.0 sources; the pinned build is from v18.18.3). The relay uses omp
 through its command line and its Collab wire contract only (see `ompInterfaces` in `compat.json`), not through the
 extension API. Its web client is **built per omp minor** from omp's release tag and pinned by hash (`webBuilds` in
 `compat.json`, mirrored in `plugins/omp-private-relay/web-builds.json`); a minor without a build needs a patch file
@@ -27,7 +27,7 @@ built with the same Bun gives the same content hash, which a release job compare
 
 ### `omp-dashboard`
 
-Tested with omp 18.18.0 and 18.18.3. It uses omp through its command line only (`omp --version`, `omp collab list --json` and `omp collab link --json` at JSON version 1, `omp config get`), plus `session-control/1` for Stop and Rename and `relay-check/1` for the relay. `doctor` fails on an omp older than 18.18.0 and warns on a version not listed in `ompTested`. The dashboard page is built with Bun and committed, pinned by hashes (`plugins/omp-dashboard/ui-build.json`). Sign-in adapters (`auth.adapter`): `loopback-only`, `tailscale-serve` and, from 0.2.0, `both` (the local address and Tailscale Serve at once); config schema 1 is unchanged in shape, `both` is one more allowed value.
+Tested with omp 18.18.0, 18.18.3 and 19.0.0. It uses omp through its command line only (`omp --version`, `omp collab list --json` and `omp collab link --json` at JSON version 1, `omp config get`), plus `session-control/1` for Stop and Rename and `relay-check/1` for the relay. `doctor` fails on an omp older than 18.18.0 and warns on a version not listed in `ompTested`. The dashboard page is built with Bun and committed, pinned by hashes (`plugins/omp-dashboard/ui-build.json`). Sign-in adapters (`auth.adapter`): `loopback-only`, `tailscale-serve` and, from 0.2.0, `both` (the local address and Tailscale Serve at once); config schema 1 is unchanged in shape, `both` is one more allowed value.
 
 ### `omp-memory`
 
@@ -37,7 +37,7 @@ Tested with the real binaries of **omp 18.18.0** (the Mac mini) and **18.18.3** 
 
 ## Bun
 
-The extension runs on the Bun that omp embeds (1.4.4 in omp 18.18.0). `omp-memory`'s importer runs on a Bun 1.4.4 or newer that it finds on `PATH` or in the usual places (never the omp binary: the importer runs `omp --version` itself). So does `omp-private-relay`: it runs as `BUN_BE_BUN=1 <omp> <script>`, never needs a separate Bun or Node, and refuses to start on a Bun older than 1.4.4 (the version collab-web's build needs). Running the tests here needs Bun 1.4.4 or newer.
+The extension runs on the Bun that omp embeds (1.4.4 in omp 19.0.0). `omp-memory`'s importer runs on a Bun 1.4.4 or newer that it finds on `PATH` or in the usual places (never the omp binary: the importer runs `omp --version` itself). So does `omp-private-relay`: it runs as `BUN_BE_BUN=1 <omp> <script>`, never needs a separate Bun or Node, and refuses to start on a Bun older than 1.4.4 (the version collab-web's build needs). Running the tests here needs Bun 1.4.4 or newer.
 
 ## Python
 

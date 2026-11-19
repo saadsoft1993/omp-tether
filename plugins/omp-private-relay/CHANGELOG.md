@@ -3,7 +3,9 @@
 All notable changes to `omp-private-relay`. The protocols it implements have their own numbers (`pairing-store/1`,
 `relay-check/1`) and change only by spec; see `docs/protocol/` in the repository.
 
-## Unreleased
+## 0.1.3 (2026-11-19)
+
+- Add a pinned web build for omp 19.0.0.
 
 - Gzip static web client text assets when the browser supports it; set `web.compression` to `false` to disable it. Pairing and authentication responses are never compressed.
 - Guests are cut after 120 seconds without drain progress or when queue memory budgets are exceeded; the defaults are 256 MiB per connection and 1 GiB relay-wide. The browser also waits 120 seconds for the welcome, each snapshot chunk and transcript replies.
