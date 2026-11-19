@@ -16,7 +16,7 @@ COMPAT = json.loads((REPO / "compat.json").read_text())["plugins"]["omp-dashboar
 
 
 def _versions(text: str) -> list[str]:
-    return re.findall(r"18\.\d+\.\d+", text)
+    return re.findall(r"\d+\.\d+\.\d+", text)
 
 
 class CompatSources(unittest.TestCase):
@@ -40,9 +40,13 @@ class CompatSources(unittest.TestCase):
     def test_the_compat_page_names_exactly_those_versions(self) -> None:
         page = (REPO / "docs" / "compat.md").read_text()
         section = page.split("### `omp-dashboard`")[1].split("###")[0]
-        tested = re.search(r"Tested with omp ((?:\d+\.\d+\.\d+(?: and )?)+)", section)
+        tested = re.search(r"Tested with omp ([0-9., ]+(?:and [0-9.]+)?)", section)
         assert tested is not None, section
         self.assertEqual(_versions(tested.group(0)), COMPAT["ompTested"])
+
+    def test_mismatched_major_version_is_detected(self) -> None:
+        with self.assertRaises(AssertionError):
+            self.assertEqual(_versions("18.18.0, 18.18.3 and 20.0.0"), COMPAT["ompTested"])
 
 
 if __name__ == "__main__":
