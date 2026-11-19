@@ -39,6 +39,7 @@ describe("defaults", () => {
 		expect(c.pairing.dir).toBe(path.join(root, ".config", "omp-private-relay", "pairing"));
 		expect(c.checkDir).toBe(path.join(root, ".config", "omp-private-relay", "check"));
 		expect(c.web.dir).toBe(path.join(root, ".local", "share", "omp-private-relay", "web", "current"));
+		expect(c.web.compression).toBe(true);
 		expect(c.limits.stallMs).toBe(120_000);
 		expect(c.limits.recheckMs).toBeLessThanOrEqual(30_000);
 	});
@@ -64,6 +65,7 @@ describe("the file", () => {
 		expect([c.listen.hostPort, c.listen.guestPort, c.limits.maxRooms]).toEqual([20001, 20002, 5]);
 		const e = loadConfig(envFor(root, { OMP_PRIVATE_RELAY_GUEST_PORT: "20003", OMP_PRIVATE_RELAY_MAX_ROOMS: "9" }));
 		expect([e.listen.guestPort, e.limits.maxRooms]).toEqual([20003, 9]);
+		expect(loadConfig(envFor(root, { OMP_PRIVATE_RELAY_WEB_COMPRESSION: "false" })).web.compression).toBe(false);
 	});
 
 	test("OMP_PRIVATE_RELAY_CONFIG names another file, and must be absolute", () => {

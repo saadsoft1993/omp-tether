@@ -239,7 +239,24 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		return new Response(body, { status, headers: { ...PLAIN_HEADERS, ...extra } });
 	}
 
-	function staticResponse(pathname: string, method: string): Response {
+	// Cache only immutable build files, never generated pairing/auth responses. The file identity is checked on each use.
+	const gzipCache = new Map<string, { key: string; bytes: Uint8Array }>();
+	function acceptsGzip(header: string | null): boolean {
+		let wildcard = 0;
+		let gzip: number | undefined;
+		for (const part of (header ?? "").split(",")) {
+			const [name, ...params] = part.trim().toLowerCase().split(";");
+			if (name !== "gzip" && name !== "*") continue;
+			const q = params.find(p => p.trim().startsWith("q="));
+			const value = q === undefined ? 1 : Number(q.trim().slice(2));
+			const quality = Number.isFinite(value) && value >= 0 && value <= 1 ? value : 0;
+			if (name === "gzip") gzip = quality;
+			else wildcard = quality;
+		}
+		return (gzip ?? wildcard) > 0;
+	}
+
+	function staticResponse(pathname: string, method: string, acceptEncoding: string | null): Response {
 		const state = webState();
 		if (state.problem) return text(503, "the web client's directory is not safe to serve from (another account could replace it); run: omp-private-relay doctor");
 		const root = state.root;
@@ -261,9 +278,27 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			return text(404, "not found");
 		}
 		const hashed = /^[a-z0-9]{8}\.(js|css|svg|png|ico|webmanifest)$/.test(rel);
-		return new Response(method === "HEAD" ? null : Bun.file(real), {
-			headers: { ...headers, "Cache-Control": hashed ? "private, max-age=31536000, immutable" : "no-cache" },
-		});
+		const asset = Bun.file(real);
+		const compressible = config.web.compression && /\.(?:js|css|html|svg|json)$/i.test(real);
+		const responseHeaders: Record<string, string> = {
+			...headers,
+			"Cache-Control": hashed ? "private, max-age=31536000, immutable" : "no-cache",
+			...(compressible ? { Vary: "Accept-Encoding" } : {}),
+		};
+		if (compressible && acceptsGzip(acceptEncoding)) {
+			const st = fs.statSync(real);
+			const key = `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
+			let cached = gzipCache.get(real);
+			if (!cached || cached.key !== key) {
+				cached = { key, bytes: Bun.gzipSync(fs.readFileSync(real)) };
+				gzipCache.set(real, cached);
+			}
+			responseHeaders["Content-Encoding"] = "gzip";
+			responseHeaders["Content-Type"] = asset.type || "application/octet-stream";
+			responseHeaders["Content-Length"] = String(cached.bytes.byteLength);
+			return new Response(method === "HEAD" ? null : cached.bytes, { headers: responseHeaders });
+		}
+		return new Response(method === "HEAD" ? null : asset, { headers: responseHeaders });
 	}
 
 	// ── guest gate ──────────────────────────────────────────────────────────────────────────────
@@ -795,7 +830,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 			if (!upgrade) {
 				if (url.pathname.startsWith("/r/")) return text(426, "websocket upgrade required");
 				if (isPairingRoute(url.pathname, req.method)) return pairAsset(url.pathname, req.method);
-				return staticResponse(url.pathname, req.method);
+				return staticResponse(url.pathname, req.method, req.headers.get("accept-encoding"));
 			}
 			const room = roomRequest(url);
 			if (!room) return text(404, "not found");

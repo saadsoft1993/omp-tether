@@ -75,7 +75,8 @@
 			"type": "object",
 			"additionalProperties": false,
 			"properties": {
-				"dir": { "$ref": "#/$defs/absPath", "description": "Directory the web client is served from. Default: <data dir>/web/current." }
+				"dir": { "$ref": "#/$defs/absPath", "description": "Directory the web client is served from. Default: <data dir>/web/current." },
+				"compression": { "type": "boolean", "default": true, "description": "Gzip static web client text assets when supported." }
 			}
 		},
 		"checkDir": { "$ref": "#/$defs/absPath", "description": "Directory for the listener check key (relay-check/1). Default: <config dir>/check." },

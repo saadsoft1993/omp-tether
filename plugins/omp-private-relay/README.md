@@ -193,6 +193,7 @@ group or others can write is refused, with every problem listed. The JSON Schema
 | `pairing.dir` | `OMP_PRIVATE_RELAY_PAIRING_DIR` | `<config dir>/pairing` | The pairing store ([`pairing-store/1`](../../docs/protocol/pairing-store-1.md)) |
 | `pairing.cookieName` | `OMP_PRIVATE_RELAY_COOKIE_NAME` | `omp_relay` | The cookie that holds the session id; in `shared` mode it must match the program that sets it |
 | `web.dir` | `OMP_PRIVATE_RELAY_WEB_DIR` | `<data dir>/web/current` | Where the web client is served from |
+| `web.compression` | `OMP_PRIVATE_RELAY_WEB_COMPRESSION` | `true` | Gzip static web client text assets when supported; set to `false` to disable |
 | `checkDir` | `OMP_PRIVATE_RELAY_CHECK_DIR` | `<config dir>/check` | Holds the listener check key ([`relay-check/1`](../../docs/protocol/relay-check-1.md)) |
 | `limits.maxRooms` | `OMP_PRIVATE_RELAY_MAX_ROOMS` | 32 | Rooms at once; the next host gets 4029 |
 | `limits.maxGuestsPerRoom` | `OMP_PRIVATE_RELAY_MAX_GUESTS` | 8 | Browsers per room; the next gets 4029 |

@@ -37,7 +37,7 @@ export interface Config {
 		tailscale: { bin: string; servePort: number | null; owner: string; publicHost: string };
 	};
 	pairing: { mode: "own" | "shared"; dir: string; cookieName: string };
-	web: { dir: string };
+	web: { dir: string; compression: boolean };
 	checkDir: string;
 	limits: Limits;
 }
@@ -67,7 +67,7 @@ type Env = Record<string, string | undefined>;
 export interface EnvOverride {
 	env: string;
 	path: string[];
-	kind: "int" | "string";
+	kind: "int" | "string" | "boolean";
 }
 
 export const ENV_OVERRIDES: EnvOverride[] = [
@@ -83,6 +83,7 @@ export const ENV_OVERRIDES: EnvOverride[] = [
 	{ env: "OMP_PRIVATE_RELAY_PAIRING_DIR", path: ["pairing", "dir"], kind: "string" },
 	{ env: "OMP_PRIVATE_RELAY_COOKIE_NAME", path: ["pairing", "cookieName"], kind: "string" },
 	{ env: "OMP_PRIVATE_RELAY_WEB_DIR", path: ["web", "dir"], kind: "string" },
+	{ env: "OMP_PRIVATE_RELAY_WEB_COMPRESSION", path: ["web", "compression"], kind: "boolean" },
 	{ env: "OMP_PRIVATE_RELAY_CHECK_DIR", path: ["checkDir"], kind: "string" },
 	{ env: "OMP_PRIVATE_RELAY_MAX_ROOMS", path: ["limits", "maxRooms"], kind: "int" },
 	{ env: "OMP_PRIVATE_RELAY_MAX_GUESTS", path: ["limits", "maxGuestsPerRoom"], kind: "int" },
@@ -196,6 +197,12 @@ export function envLayer(env: Env): { layer: Json; problems: string[] } {
 				continue;
 			}
 			setPath(layer, o.path, Number(raw));
+		} else if (o.kind === "boolean") {
+			if (raw !== "true" && raw !== "false") {
+				problems.push(`${o.env}: must be true or false`);
+				continue;
+			}
+			setPath(layer, o.path, raw === "true");
 		} else setPath(layer, o.path, raw);
 	}
 	return { layer, problems };
@@ -221,7 +228,7 @@ function defaults(env: Env): Json {
 			tailscale: { bin: "tailscale", servePort: null, owner: "", publicHost: "" },
 		},
 		pairing: { mode: "own", dir: path.join(configDir(env), "pairing"), cookieName: "omp_relay" },
-		web: { dir: path.join(dataDir(env), "web", "current") },
+		web: { dir: path.join(dataDir(env), "web", "current"), compression: true },
 		checkDir: path.join(configDir(env), "check"),
 		limits: { ...DEFAULT_LIMITS },
 	};
