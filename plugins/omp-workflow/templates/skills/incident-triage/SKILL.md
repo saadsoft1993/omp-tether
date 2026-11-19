@@ -25,5 +25,4 @@ Goal: restore service safely first, explain later. **Read-only until the user ap
 Give the user: impact, likely cause with evidence, 1–2 mitigation options with risk and rollback. Wait for yes.
 
 ## After
-Verify recovery from outside (curl + browser + logs quiet 10 min). Draft the team/customer update with `work-message-writing`
-(send after release approval). Write the `root-cause-report` in `<project-docs>/rca/`, create follow-up tracking tickets.
+Verify recovery from outside (curl + browser + logs quiet 10 min). Use `work-message-writing` for the team/customer update if installed; otherwise draft a concise update stating impact, recovery status, remaining uncertainty and next update. Send only after approval. Write the `root-cause-report` in `docs/products/<product>/rca/`, create follow-up tracking tickets.

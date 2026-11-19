@@ -5,7 +5,7 @@ description: Document, audit or extend the design system of a product — tokens
 
 # Design system
 
-One file per product: `<project-docs>/design-system.md` (create it from the code if missing — never invent tokens).
+One file per product: `docs/products/<product>/design-system.md` (create it from the code if missing — never invent tokens).
 
 ## Extract from the code
 - Inspect the project’s styles, CSS variables, component library and existing form/table/dialog wrappers.

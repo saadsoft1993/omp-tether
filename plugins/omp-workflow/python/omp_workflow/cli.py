@@ -66,12 +66,20 @@ def backup_config(agent):
     while True:
         candidate = path if not suffix else path.with_name(f"{path.name}-{suffix}")
         try:
-            with candidate.open("xb") as target, config.open("rb") as source:
-                shutil.copyfileobj(source, target)
-            shutil.copymode(config, candidate)
-            return str(candidate)
+            fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
             suffix += 1
+            continue
+        try:
+            try:
+                with open(fd, "wb", closefd=False) as target, config.open("rb") as source:
+                    shutil.copyfileobj(source, target)
+            finally:
+                os.close(fd)
+        except BaseException:
+            candidate.unlink(missing_ok=True)
+            raise
+        return str(candidate)
 
 
 def confirm(yes):

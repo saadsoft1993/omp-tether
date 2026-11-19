@@ -9,7 +9,7 @@ You (the main session) are the conductor. Dispatch each stage using the availabl
 
 ## 0. Intake
 - Identify the product and repository. Ask if unclear.
-- Read `<project-docs>/status.md` + `decisions.md`. Say in one line where the product stands.
+- Read `docs/products/<product>/status.md` and `docs/products/<product>/decisions.md`. Say in one line where the product stands.
 - Size it: **small-fix path** (as defined by the applicable workflow) → skip to step 3 with one engineer, then code-reviewer and release approval. No PRD.
   **bug path** (something broken, not new scope; an obvious ≤1-file bug takes the small-fix path instead) →
   `qa-engineer` `bug-validate` (skip if already validated) → REAL items to frontend / backend engineers by layer.
@@ -24,7 +24,7 @@ Relay questions to the user (max 3 at a time, with recommended defaults). Loop u
 
 ## 2. Design — `ui-designer` + `architect`, then `plan-verifier`
 Dispatch in ONE message when the feature has UI: `ui-designer` → flow + HTML mockups with all states and copy
-(`<project-docs>/design/`); `architect` → design review + API contract + ADRs + phased plan (`<project-docs>/plans/<date>-<slug>.md`).
+(`docs/products/<product>/design/`); `architect` → design review + API contract + ADRs + phased plan (`docs/products/<product>/plans/<date>-<slug>.md`).
 Then reconcile: mockup fields ↔ API contract.
 plan-verifier (configured plan-verification role) → per-step HOLDS/RISKY/BROKEN and an overall PROCEED / PROCEED WITH CHANGES / DO NOT PROCEED.
 - PROCEED WITH CHANGES → architect applies the required changes; re-verify only the changed parts; then plan approval.
@@ -47,5 +47,5 @@ confirm separately which of marking the change ready, merging and deploying the 
 Then merge/deploy (the project deployment procedure), and verify in the target environment.
 
 ## 6. Close
-`product-manager`: prepend decisions (newest first), rewrite `status.md` (≤40 lines), list follow-ups.
+`product-manager`: prepend decisions (newest first) in `docs/products/<product>/decisions.md`, rewrite `docs/products/<product>/status.md` (≤40 lines), list follow-ups.
 Final message to the user: outcome, links (MR, the project tracker, page), VERIFIED/UNVERIFIED.

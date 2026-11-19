@@ -5,7 +5,7 @@ description: The shared write-up format for a bug investigation or incident — 
 
 # Root-cause report
 
-Save as `<project-docs>/rca/<date>-<slug>.md` (incidents and anything that hit users), otherwise put it in the MR description.
+Save as `docs/products/<product>/rca/<date>-<slug>.md` (incidents and anything that hit users), otherwise put it in the MR description.
 
 ```
 # <one-line symptom>

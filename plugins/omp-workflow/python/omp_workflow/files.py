@@ -41,7 +41,10 @@ def plan_files(agent, advisor, old_files):
         bounds = block_bounds(data)
         old = old_files.get("RULES.md", {})
         if old.get("kind") == "file":
-            print("kept yours: RULES.md")
+            if old.get("sha256") == digest(data):
+                print("unchanged: RULES.md")
+            else:
+                print("kept yours: RULES.md")
         else:
             block = rules_block(template)
             if bounds:
@@ -49,7 +52,10 @@ def plan_files(agent, advisor, old_files):
             else:
                 separator = b"" if not data or data.endswith(b"\n") else b"\n"
                 content = data + separator + block
-            operations.append(("RULES.md", content, "block", block))
+            if content == data:
+                print("unchanged: RULES.md")
+            else:
+                operations.append(("RULES.md", content, "block", block))
     if advisor:
         watchdog = agent / "WATCHDOG.yml"
         if watchdog.exists():

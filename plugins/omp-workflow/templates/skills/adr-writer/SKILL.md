@@ -5,7 +5,7 @@ description: Write an architecture decision record (ADR) for a product. Use when
 
 # ADR writer
 
-Path: `<project-docs>/adr/NNNN-<slug>.md` (NNNN = next number).
+Path: `docs/products/<product>/adr/NNNN-<slug>.md` (NNNN = next number).
 ```
 # ADR-NNNN: <title>
 Date · Status: Proposed|Accepted|Superseded by ADR-x

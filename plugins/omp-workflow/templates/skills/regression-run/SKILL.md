@@ -8,7 +8,7 @@ description: Re-test a product after a fix or before a release — re-run the or
 ## Scope (write it down first)
 1. The fixed items: their original repro steps (from `bug-validate` / the project tracker).
 2. Neighbours: same screen, same API, same model, same permission — find them by inspecting callers and affected flows.
-3. Core flows: the P0 scenarios of the product's test plan (`<project-docs>/qa/`) or the latest UAT doc (`docs/uat/`).
+3. Core flows: the P0 scenarios of the product's test plan (`docs/products/<product>/qa/`) or the latest UAT doc (`docs/uat/`).
 
 ## Run
 - Automated first: the repo's test suite / CI pipeline result for the exact commit (the project CI status).

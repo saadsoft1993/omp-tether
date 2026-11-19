@@ -6,7 +6,7 @@ description: Review or produce the architecture of a product or feature — comp
 # System design review
 
 ## Inputs
-Approved PRD (or the question), `<project-docs>/{vision,decisions,status}.md`, the code
+Approved PRD (or the question), `docs/products/<product>/{vision,decisions,status}.md`, the code
 and its relevant callers, infra (Terraform, CI, compose files).
 
 ## Checklist — answer each with evidence (file:line, resource ID) or "unknown"
@@ -21,7 +21,7 @@ and its relevant callers, infra (Terraform, CI, compose files).
 9. **Security:** authN/Z, network exposure, secrets — hand detail to a security engineer.
 10. **Team fit:** the team’s existing skills; avoid stacks nobody can maintain.
 
-## Output — `<project-docs>/architecture/<date>-<slug>.md`
+## Output — `docs/products/<product>/architecture/<date>-<slug>.md`
 Context · component diagram (mermaid) · data flow for the 2–3 main journeys · checklist results ·
 risks ranked (likelihood × impact) with mitigation · decisions needing an ADR (`adr-writer`) · open questions.
 Send to `plan-verifier` before the user sees it at plan approval.

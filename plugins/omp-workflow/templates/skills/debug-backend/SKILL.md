@@ -29,5 +29,5 @@ If it only fails with real data, find the shape of the data with a **read-only**
 ## 4. Fix + prove
 
 Follow the applicable planning and approval rules; for a fix plan include files, approach, risks and rollback.
-Minimal change at the cause; the new test fails before, passes after; full suite green; `django-verification` for Django.
+Minimal change at the cause; the new test fails before, passes after; full suite green. For Django, use `django-verification` if installed; otherwise run the project's tests and lint, check migrations and deployment configuration, and report any unverified security or deploy checks.
 Write up with `root-cause-report`; follow the project’s review workflow; QA runs `regression-run`.

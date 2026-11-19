@@ -6,14 +6,14 @@ description: Design a screen or flow for a product before it is built — user f
 # UI mockup
 
 ## 1. Understand
-PRD user stories + ACs, roles, `<project-docs>/glossary.md`, the product's `design-system` notes, and 2–3 existing
+PRD user stories + ACs, roles, `docs/products/<product>/glossary.md`, the product's `design-system` notes, and 2–3 existing
 screens of the same app (screenshot them in the browser) so the new screen looks like it belongs.
 
 ## 2. Flow first
 List the journey as steps (entry → actions → outcome) per role, including failure paths. Mermaid flowchart in the doc.
 
 ## 3. Mockup
-- One self-contained HTML file per screen: `<project-docs>/design/<date>-<feature>/<screen>.html`
+- One self-contained HTML file per screen: `docs/products/<product>/design/<date>-<feature>/<screen>.html`
   (use the product’s existing styles and tokens).
 - Show every state side by side or with a state switcher: default, empty, loading, error, success, validation errors per field,
   permission-denied, long text/large numbers, mobile width (375px).

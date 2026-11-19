@@ -1,5 +1,6 @@
 """Exercise the launcher with an isolated fake omp process."""
 
+import importlib
 import json
 import os
 import subprocess
@@ -7,9 +8,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PLUGIN = Path(__file__).resolve().parents[2]
 LAUNCHER = PLUGIN / "bin" / "omp-workflow"
+sys.path.insert(0, str(PLUGIN / "python"))
+cli = importlib.import_module("omp_workflow.cli")
 MODELS = [
     "anthropic/claude-opus-5-5",
     "anthropic/claude-sonnet-5-5",
@@ -146,6 +150,66 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(state.stat().st_mode & 0o777, 0o600)
         self.assertEqual(state.parent.stat().st_mode & 0o777, 0o700)
         self.assertIn("RULES.md: unchanged", self.run_cli("status").stdout)
+
+    def test_backup_is_private_during_copy_and_after_success(self):
+        config = self.agent / "config.yml"
+        config.write_text("secret")
+        config.chmod(0o644)
+
+        def copy(source, target):
+            self.assertEqual(os.fstat(target.fileno()).st_mode & 0o777, 0o600)
+            target.write(source.read())
+
+        old_umask = os.umask(0o022)
+        try:
+            with patch.object(cli.shutil, "copyfileobj", side_effect=copy):
+                backup = Path(cli.backup_config(self.agent))
+        finally:
+            os.umask(old_umask)
+        self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(backup.read_text(), "secret")
+
+    def test_failed_backup_removes_partial_file(self):
+        (self.agent / "config.yml").write_text("secret")
+
+        def fail(source, target):
+            target.write(source.read())
+            raise OSError("copy failed")
+
+        with patch.object(cli.shutil, "copyfileobj", side_effect=fail):
+            with self.assertRaisesRegex(OSError, "copy failed"):
+                cli.backup_config(self.agent)
+        self.assertEqual(list(self.agent.glob("config.yml.bak-omp-workflow-*")), [])
+
+    def test_repeated_init_leaves_rules_and_state_unchanged(self):
+        for existing in (False, True):
+            with self.subTest(existing=existing):
+                agent = self.agent
+                state_root = self.root / "state"
+                rules = agent / "RULES.md"
+                if existing:
+                    rules.write_text("personal")
+                (agent / "config.yml").write_text("original")
+                self.run_cli("init", "--yes")
+                state = state_root / "omp-workflow" / "state.json"
+                original_state = state.read_bytes()
+                original_rules = rules.read_bytes()
+                os.utime(rules, ns=(1_000_000_000, 1_000_000_000))
+                backups = set(agent.glob("config.yml.bak-omp-workflow-*"))
+                result = self.run_cli("init", "--yes")
+                self.assertIn("unchanged: RULES.md", result.stdout)
+                self.assertNotIn("write RULES.md", result.stdout)
+                self.assertEqual(rules.read_bytes(), original_rules)
+                self.assertEqual(rules.stat().st_mtime_ns, 1_000_000_000)
+                self.assertEqual(state.read_bytes(), original_state)
+                self.assertEqual(set(agent.glob("config.yml.bak-omp-workflow-*")), backups)
+                self.run_cli("uninstall", "--yes")
+                if existing:
+                    self.assertEqual(rules.read_text(), "personal")
+                else:
+                    self.assertFalse(rules.exists())
+                for path in agent.glob("config.yml.bak-omp-workflow-*"):
+                    path.unlink()
 
     def test_normalized_setting_is_recorded_and_removed(self):
         self.run_cli("init", "--yes")

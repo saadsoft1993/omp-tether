@@ -14,4 +14,4 @@ description: Run an end-to-end lifecycle test of a product in a real browser —
 
 ## Human QA handoff (when asked)
 Environment URL, which roles/test accounts exist (point to where credentials are stored, never paste them),
-feature list, step-by-step workflows, what to check, how to report bugs. Draft with `work-message-writing`; send only after approval.
+feature list, step-by-step workflows, what to check, how to report bugs. Use `work-message-writing` if installed; otherwise draft a concise, actionable handoff with those details. Send only after approval.

@@ -5,7 +5,7 @@ description: Write a test plan for a feature or release from the PRD acceptance 
 
 # Test plan
 
-Output: `<project-docs>/qa/<date>-<feature>-test-plan.md`.
+Output: `docs/products/<product>/qa/<date>-<feature>-test-plan.md`.
 
 ## Build it
 1. Source: PRD acceptance criteria (each AC gets ≥1 scenario — keep the AC id), roles from the PRD/glossary, decisions.md.

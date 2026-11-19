@@ -5,7 +5,7 @@ description: Write or update a product requirements document (PRD) for a product
 
 # PRD writer
 
-Output: `<project-docs>/prd/<YYYY-MM-DD>-<slug>.md`
+Output: `docs/products/<product>/prd/<YYYY-MM-DD>-<slug>.md`
 
 ## Interview
 Ask only what blocks a testable acceptance criterion. Max 3 questions per round, each with a
