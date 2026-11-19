@@ -5,7 +5,7 @@ All notable changes to `omp-private-relay`. The protocols it implements have the
 
 ## Unreleased
 
-- Guests are cut after 30 seconds without drain progress or when queue memory budgets are exceeded; the defaults are 256 MiB per connection and 1 GiB relay-wide.
+- Guests are cut after 120 seconds without drain progress or when queue memory budgets are exceeded; the defaults are 256 MiB per connection and 1 GiB relay-wide. The browser also waits 120 seconds for the welcome, each snapshot chunk and transcript replies.
 - Guest connections use a 960-second idle timeout (was 120). Behind a slow proxied link a large catch-up can still be in flight downstream after it leaves the relay, and the 120-second keepalive window dropped those guests.
 - A viewer the host disconnects (close 4409) sees "Disconnected by the host" with "Reload to reconnect", and the status pill reads "Disconnected"; it said "Session ended" though the session goes on. Local builds only (the patch marker is unchanged); rebuild to get it.
 

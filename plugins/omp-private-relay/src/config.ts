@@ -56,7 +56,7 @@ export const DEFAULT_LIMITS: Limits = {
 	// Real resident memory can reach about 2x these (Bun doubles its send buffer as it grows).
 	connQueueMax: 256 * MiB,
 	relayQueueMax: 1024 * MiB,
-	stallMs: 30_000,
+	stallMs: 120_000,
 	recheckMs: 10_000,
 	restartGraceMs: 60_000,
 };

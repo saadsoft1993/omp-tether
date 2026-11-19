@@ -39,6 +39,7 @@ describe("defaults", () => {
 		expect(c.pairing.dir).toBe(path.join(root, ".config", "omp-private-relay", "pairing"));
 		expect(c.checkDir).toBe(path.join(root, ".config", "omp-private-relay", "check"));
 		expect(c.web.dir).toBe(path.join(root, ".local", "share", "omp-private-relay", "web", "current"));
+		expect(c.limits.stallMs).toBe(120_000);
 		expect(c.limits.recheckMs).toBeLessThanOrEqual(30_000);
 	});
 
