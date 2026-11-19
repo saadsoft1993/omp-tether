@@ -1,5 +1,5 @@
 {
-	"comment": "Per-file exemptions of the publication checker (scripts/check-public.sh passes this file as --exempt). Exact paths only, one reason each; test_exemptions.py enforces that. Only the product-name rule may be exempted here: omp-memory imports the memory files of other coding tools, so the files below have to name them (as data sources, identifiers such as the `claude-memory` source id, and file locations). Nothing else is exempted.",
+	"comment": "Per-file exemptions of the publication checker (scripts/check-public.sh passes this file as --exempt). Exact paths only, one reason each; test_exemptions.py enforces that. Only the product-name rule may be exempted here: omp-memory imports the memory files of other coding tools, so the files below have to name them (as data sources, identifiers such as the `claude-memory` source id, and file locations). The omp-workflow plugin and the install prompt name model vendors because they configure models. Nothing else is exempted.",
 	"rules": {
 		"ai-name": [
 			"plugins/omp-memory/README.md",
@@ -45,6 +45,12 @@
 			"plugins/omp-memory/vendor/omp_hub/memory/mnemopi.py",
 			"plugins/omp-memory/vendor/omp_hub/memory/model.py",
 			"plugins/omp-memory/vendor/omp_hub/memory/sources.py",
+			"INSTALL-PROMPT.md",
+			"plugins/omp-workflow/README.md",
+			"plugins/omp-workflow/python/omp_workflow/cli.py",
+			"plugins/omp-workflow/python/omp_workflow/settings.py",
+			"plugins/omp-workflow/templates/skills/model-routing-lifecycle/SKILL.md",
+			"plugins/omp-workflow/tests/python/test_cli.py",
 			"tools/public-tree-check/exemptions.json"
 		]
 	},
@@ -93,7 +99,13 @@
 			"plugins/omp-memory/tests/python/test_secret_outputs.py": "feeds recognised secrets into names in the layout of those tools' files and checks no command prints them",
 			"plugins/omp-memory/vendor/memory_import/test/secret-matrix.test.ts": "feeds recognised secrets into source ids, folders and files of those tools and checks no command prints them",
 			"plugins/omp-memory/vendor/memory_import/main.ts": "the importer's command line: names the sources it reads (claude-memory, claude-mem) in its usage text and options",
-			"plugins/omp-memory/vendor/memory_import/test/entry.test.ts": "runs the importer's entry point with a stand-in `--source claude-memory` command"
+			"plugins/omp-memory/vendor/memory_import/test/entry.test.ts": "runs the importer's entry point with a stand-in `--source claude-memory` command",
+			"INSTALL-PROMPT.md": "the install prompt tells the user which model vendors' models to configure for each role",
+			"plugins/omp-workflow/README.md": "the plugin's guide: explains the model roles it configures and names the model vendors",
+			"plugins/omp-workflow/python/omp_workflow/cli.py": "the CLI's help and output name the model vendors whose models it configures",
+			"plugins/omp-workflow/python/omp_workflow/settings.py": "writes the model role settings; the model identifiers carry vendor names",
+			"plugins/omp-workflow/templates/skills/model-routing-lifecycle/SKILL.md": "the skill template routes work to models by vendor, so it names them",
+			"plugins/omp-workflow/tests/python/test_cli.py": "tests the CLI's model role configuration with fixtures that carry vendor model names"
 		}
 	}
 }

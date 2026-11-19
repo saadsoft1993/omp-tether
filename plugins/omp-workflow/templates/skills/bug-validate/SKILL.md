@@ -1,6 +1,6 @@
 ---
 name: bug-validate
-description: Validate a list of reported bugs for a product — decide which are real, not bugs, duplicates or not reproducible, with evidence and the responsible layer (frontend/backend/infra). Use for 'are these bugs genuine', 'verify the bugs we found', 'which reported issues are valid', before any fix.
+description: Validate a list of reported bugs for a product — decide which are real, not bugs, duplicates or not reproducible, with evidence and the responsible layer (frontend/backend/infra). Use for 'are these bugs genuine', 'verify the reported bugs', 'which reported issues are valid', before any fix.
 ---
 
 # Bug validation

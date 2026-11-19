@@ -8,7 +8,7 @@ Session opens in plan mode on the `plan` model role. For any task that edits cod
 4. REVIEW (mandatory for every code change, no exceptions): after code is written, spawn `code-reviewer` through `task` (on the `code_review` role; a different vendor from the author when you have one). Fix findings, rerun checks.
 5. REPORT with evidence: commands run and their results (tests, lint, types), tests added or updated when behaviour changed, plus what was not verified.
 
-Small-fix path (one file, obvious, no schema/auth/infra): skip step 2 only. Steps 3, 4 and 5 still apply, including a test for the changed behaviour and the independent review.
+Small-fix path (one file, obvious, no schema/auth/infra): skip step 2 only. Steps 3, 4 and 5 still apply, including a test for the changed behaviour and the review by a separate reviewer.
 
 Q&A and read-only investigation need no delegation: answer directly in the main session.
 

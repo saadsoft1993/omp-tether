@@ -39,5 +39,5 @@ Back up config.yml before editing. Test overlays with `omp -p --config "$TMPDIR/
 Session logs: `~/.omp/agent/sessions/<cwd-slug>/<ts>.jsonl`; subagents in sibling dir `<ts>/<Name>.jsonl`, advisor in `__advisor.default.jsonl`. Parse `model_change` events and assistant `message.provider/model` per file. Test on a scratch git repo with a multi-file task; in `-p` mode the main session stops at the plan gate, so send a follow-up `omp -p --continue "Plan approved. Proceed"`.
 
 ## Pitfalls
-- Trivial fixes may skip the plan check but never independent code review (small-fix rule).
+- Trivial fixes may skip the plan check but never separate code review (small-fix rule).
 - Trust prompts for new folders block CLI workers in tmux.
