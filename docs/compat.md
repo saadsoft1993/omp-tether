@@ -7,7 +7,7 @@
 | | |
 |---|---|
 | Minimum | 18.18.0 |
-| Tested | 18.18.0, 18.19.0, 19.0.0 |
+| Tested (omp-services) | 18.18.0, 18.19.0, 19.0.0 |
 
 Only a listed version has been run. The extension uses omp's documented extension API for everything it needs, plus two
 omp-internal modules that are loaded optionally (see `ompInternals` in `compat.json`): if either goes away the extension
@@ -15,6 +15,10 @@ still loads and works, and loses one feature (live self-disable) or reads only d
 
 `make gate` loads every plugin in a real omp in a scratch home and checks that it registers what it should. Run it
 against a new omp release before adding that release to `tested`.
+
+### `omp-session-control`
+
+Tested with omp 18.18.0 and 18.19.0. The omp 19.0.0 integration suite has an unresolved plan-review failure.
 
 ### `omp-private-relay`
 

@@ -3,7 +3,7 @@
 	"omp": {
 		"minimum": "18.18.0",
 		"tested": ["18.18.0", "18.19.0", "19.0.0"],
-		"note": "`tested` is the list for omp-session-control and omp-services; omp-private-relay and omp-dashboard list theirs as `ompTested` under `plugins`. Only listed versions have been run. Newer versions are expected to work but are untested until listed."
+		"note": "`tested` is the list for omp-services; plugins with an `ompTested` list use their own list. Only listed versions have been run. Newer versions are expected to work but are untested until listed."
 	},
 	"bun": {
 		"minimum": "1.4.4",
@@ -22,6 +22,7 @@
 	"plugins": {
 		"omp-session-control": {
 			"version": "0.4.1",
+			"ompTested": ["18.18.0", "18.19.0"],
 			"extensionId": "extension-module:omp-session-control",
 			"protocols": ["session-control/1"],
 			"platforms": ["darwin", "linux"],
