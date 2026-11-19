@@ -73,6 +73,7 @@ if grep -q 'um.can.ac' "$dist/index.html"; then echo "third-party analytics scri
 if grep -q 'void 0,!1,void 0,this)' "${js[@]}"; then echo "bundle uses development JSX calls: wrong Bun" >&2; exit 1; fi
 grep -q 'this browser is not paired with the relay' "${js[@]}" || { echo "close 4401 text missing from the bundle: the patch did not apply" >&2; exit 1; }
 grep -q 'disconnected by the host; reload to reconnect' "${js[@]}" || { echo "close 4409 text missing from the bundle: the patch did not apply" >&2; exit 1; }
+grep -q 'Disconnected by the host' "${js[@]}" || { echo "close 4409 dialog title missing from the bundle: the patch did not apply" >&2; exit 1; }
 grep -q 'location.hostname' "${js[@]}" || { echo "loopback rewrite missing from the bundle: the patch did not apply" >&2; exit 1; }
 
 cp -R "$dist" "$out"

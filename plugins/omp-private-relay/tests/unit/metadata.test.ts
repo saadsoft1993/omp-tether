@@ -83,6 +83,18 @@ describe("package, catalog, changelog and compat.json agree", () => {
 	});
 });
 
+test("a viewer the host disconnected is told so, not that the session ended", () => {
+	const build = read(PLUGIN_ROOT, "scripts", "build-web.sh");
+	for (const minor of ["18.18", "18.19"]) {
+		const patch = read(PLUGIN_ROOT, "patches", `collab-web-${minor}.patch`);
+		expect(patch).toContain('+		const title = kicked ? "Disconnected by the host" : "Session ended";');
+		expect(patch).toContain('+		const reason = kicked ? "Reload to reconnect" : endedReason;');
+		expect(patch).toContain('? "Disconnected" : PHASE_LABEL[phase]}');
+		expect(patch).toContain("+	return reason === RELAY_CLOSE_REASONS[4409];");
+	}
+	expect(build).toContain("grep -q 'Disconnected by the host'");
+});
+
 test("web patch makes both revocation and host disconnect terminal and checks their bundled messages", () => {
 	const build = read(PLUGIN_ROOT, "scripts", "build-web.sh");
 	expect(build).toContain('patch="$here/patches/collab-web-$minor.patch"');

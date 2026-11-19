@@ -9,6 +9,79 @@
  	</head>
  	<body>
  		<div id="root"></div>
+--- a/packages/collab-web/src/app.tsx
++++ b/packages/collab-web/src/app.tsx
+@@ -163,6 +163,7 @@
+ 				header={snap.header}
+ 				state={snap.state}
+ 				phase={snap.phase}
++				endedReason={snap.endedReason}
+ 				readOnly={snap.readOnly}
+ 				subCount={subCount}
+ 				railOpen={railOpen}
+--- a/packages/collab-web/src/components/shell/Banners.tsx
++++ b/packages/collab-web/src/components/shell/Banners.tsx
+@@ -1,5 +1,6 @@
+ import type { ReactNode } from "react";
+ import type { ConnectionPhase, GuestSnapshot } from "../../lib/client";
++import { disconnectedByHost } from "../../lib/socket";
+ 
+ export interface BannersProps {
+ 	phase: ConnectionPhase;
+@@ -28,11 +29,14 @@
+ 		);
+ 	}
+ 	if (phase === "ended") {
++		const kicked = disconnectedByHost(endedReason);
++		const title = kicked ? "Disconnected by the host" : "Session ended";
++		const reason = kicked ? "Reload to reconnect" : endedReason;
+ 		return (
+-			<div className="sh-ended" role="alertdialog" aria-label="session ended">
++			<div className="sh-ended" role="alertdialog" aria-label={title.toLowerCase()}>
+ 				<div className="sh-ended-card">
+-					<div className="sh-ended-title">Session ended</div>
+-					{endedReason && <div className="sh-ended-reason">{endedReason}</div>}
++					<div className="sh-ended-title">{title}</div>
++					{reason && <div className="sh-ended-reason">{reason}</div>}
+ 					<div className="sh-ended-actions">
+ 						<button type="button" className="sh-btn sh-btn-primary" onClick={onRejoin}>
+ 							Rejoin
+--- a/packages/collab-web/src/components/shell/HeaderBar.tsx
++++ b/packages/collab-web/src/components/shell/HeaderBar.tsx
+@@ -4,6 +4,7 @@
+ import { memo } from "react";
+ import type { ConnectionPhase } from "../../lib/client";
+ import { fmtPercent, shortenPath } from "../../lib/format";
++import { disconnectedByHost } from "../../lib/socket";
+ import { OmpMark } from "./OmpMark";
+ import { ThemeToggle } from "./ThemeToggle";
+ 
+@@ -19,6 +20,8 @@
+ 	header: SessionHeader | null;
+ 	state: SessionState | null;
+ 	phase: ConnectionPhase;
++	/** Why the session ended, when it has: a viewer the host disconnected is labelled so, not "Ended". */
++	endedReason?: string | null;
+ 	readOnly: boolean;
+ 	subCount: number;
+ 	railOpen: boolean;
+@@ -31,6 +34,7 @@
+ 	header,
+ 	state,
+ 	phase,
++	endedReason = null,
+ 	readOnly,
+ 	subCount,
+ 	railOpen,
+@@ -67,7 +71,7 @@
+ 			<div className="sh-header-right">
+ 				<span className={`sh-status sh-status-${phase}`} title={`connection: ${phase}`}>
+ 					<span className={`sh-dot sh-dot-${phase}`} />
+-					{PHASE_LABEL[phase]}
++					{phase === "ended" && disconnectedByHost(endedReason) ? "Disconnected" : PHASE_LABEL[phase]}
+ 				</span>
+ 				{readOnly && (
+ 					<span className="sh-chip" title="you joined with a read-only link — watching only">
 --- a/packages/collab-web/src/lib/link.ts
 +++ b/packages/collab-web/src/lib/link.ts
 @@ -164,5 +164,21 @@
@@ -36,7 +109,7 @@
 +}
 --- a/packages/collab-web/src/lib/socket.ts
 +++ b/packages/collab-web/src/lib/socket.ts
-@@ -15,6 +15,8 @@
+@@ -15,8 +15,15 @@
  	4004: "no such room",
  	4009: "a host is already connected for this room",
  	4029: "room is full",
@@ -44,4 +117,11 @@
 +	4409: "disconnected by the host; reload to reconnect",
  };
  
++/** Whether a session ended because its host disconnected this viewer (relay close 4409); the session goes on. */
++export function disconnectedByHost(reason: string | null): boolean {
++	return reason === RELAY_CLOSE_REASONS[4409];
++}
++
  const BACKOFF_BASE_MS = 1_000;
+ const BACKOFF_MAX_MS = 30_000;
+ /** Max enveloped frames buffered while a reconnect is pending; overflow is dropped. */
