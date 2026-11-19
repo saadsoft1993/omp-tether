@@ -24,7 +24,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 export const PLUGIN_NAME = "omp-session-control";
-export const PLUGIN_VERSION = "0.4.0";
+export const PLUGIN_VERSION = "0.4.1";
 /** Wire protocol versions this build speaks (docs/protocol/control-1.md). */
 export const PROTOCOL_VERSIONS: readonly number[] = [1];
 const PROTOCOL_VERSION = 1;
@@ -1069,7 +1069,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			});
 		}
 		const deadline = Promise.withResolvers<void>();
-		const timer = c.setTimeout(deadline.resolve, 5000);
+		const timer = c.setTimeout(() => deadline.resolve(), 5000);
 		await Promise.race(settle ? [settle, admitted.promise, deadline.promise] : [admitted.promise, deadline.promise]);
 		c.clearTimer(timer);
 		return { ...entry.result };

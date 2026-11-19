@@ -185,7 +185,7 @@ class SessionControlInRealOmp(unittest.TestCase):
         self.assertFalse((self.scratch.home / ".config").exists(), "installing must not create anything outside ~/.omp")
         self.omp.type("/session-control status")
         kit.wait_for(lambda: "inert" in self.omp.text(), timeout=20, what="the status text")
-        self.assertIn("omp-session-control 0.4.0", self.omp.text())
+        self.assertIn("omp-session-control 0.4.1", self.omp.text())
         self.assertFalse((self.scratch.home / ".config").exists(), "status must not create anything either")
 
     def test_01_on_command_enables_this_session(self) -> None:

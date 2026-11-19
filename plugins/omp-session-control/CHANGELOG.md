@@ -3,6 +3,10 @@
 All notable changes to `omp-session-control`. The wire protocol has its own number (`session-control/1`) and changes
 only by spec; see `docs/protocol/control-1.md` in the repository.
 
+## 0.4.1 (2026-11-19)
+
+- Support omp 19.0.0.
+
 ## 0.4.0 (2026-11-18)
 
 - Expose the goal objective and interrupt mode in `session-info`, and track open ask forms for dashboard review.
