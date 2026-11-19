@@ -50,7 +50,7 @@
 			]
 		},
 		"omp-services": {
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"extensionId": "extension-module:omp-services",
 			"protocols": ["health/1", "services/1", "config/1"],
 			"platforms": ["darwin", "linux"],

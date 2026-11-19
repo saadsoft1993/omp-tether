@@ -14,7 +14,7 @@ run to get those, safely:
 - **`omp-services uninstall`** (keeps your data) and **`purge`** (asks separately).
 - **`/omp-services doctor`** and **`/omp-services setup`** inside an omp session.
 
-Supported: macOS and Linux, omp 18.18.0 or newer (tested on 18.18.0; `doctor` says when your version is not one of the
+Supported: macOS and Linux, omp 18.18.0 or newer (tested on 18.18.0, 18.19.0 and 19.0.0; `doctor` says when your version is not one of the
 tested ones), Python 3.10 or newer. Not Windows. **No third-party Python packages.**
 
 ## What it never does

@@ -18,7 +18,7 @@
 		{
 			"name": "omp-services",
 			"source": "./plugins/omp-services",
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"description": "Sets up and checks the background services other omp plugins need: launchd and systemd user units, a heartbeat that runs health checks other plugins contribute, doctor. Nothing is installed until you confirm a plan.",
 			"license": "MIT",
 			"category": "productivity",
