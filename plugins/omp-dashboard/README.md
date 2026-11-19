@@ -13,7 +13,7 @@ starts new ones, from a phone or another computer as well as from the machine it
   expire after 90 days. Nothing is started, edited or sent without a click or a command of yours.
 - **No accounts, no analytics, no third-party assets.** The page is served from this plugin with a strict Content-Security-Policy.
 
-Supported: macOS and Linux, omp 18.18.x (tested on 18.18.0 and 18.18.3), Python 3.10 or newer (standard library only), one trusted user account.
+Supported: macOS and Linux, omp 18.18.x and 19.0.x (tested on 18.18.0 and 18.18.3 and 19.0.0), Python 3.10 or newer (standard library only), one trusted user account.
 Not supported: Windows; machines several people share (see [Who this protects against](#who-this-protects-against)).
 
 ## Install and run
