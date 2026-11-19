@@ -5,7 +5,8 @@ only by spec; see `docs/protocol/control-1.md` in the repository.
 
 ## 0.4.1 (2026-11-19)
 
-- Support omp 19.0.0.
+- Build against omp 19.0.0's types: the stop deadline's timer callback no longer passes timer arguments through to the
+  promise resolver. omp 19.0.0 is not yet listed as tested: one plan-review integration test still fails there.
 
 ## 0.4.0 (2026-11-18)
 

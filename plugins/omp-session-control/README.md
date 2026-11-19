@@ -17,7 +17,7 @@ renaming inside the session, from 0.2.0 shows a pending plan review and answers 
 - **A documented protocol.** [`docs/protocol/control-1.md`](../../docs/protocol/control-1.md) specifies it, and a
   conformance suite checks any implementation against it, so you can write your own client.
 
-Supported: macOS and Linux, with omp 18.18.0 or newer (tested on 18.18.0). Plan review needs an omp that has `ctx.getPendingPlanReview` and `ctx.resolvePlanReview` (18.19.0 does); on an older omp the other operations work and the plan operations are simply not offered. Not supported: Windows (omp uses named pipes
+Supported: macOS and Linux, with omp 18.18.0 or newer (tested on 18.18.0 and 18.19.0; omp 19.0.0 is untested, see `docs/compat.md`). Plan review needs an omp that has `ctx.getPendingPlanReview` and `ctx.resolvePlanReview` (18.19.0 does); on an older omp the other operations work and the plan operations are simply not offered. Not supported: Windows (omp uses named pipes
 there; this extension uses Unix sockets).
 
 ## Install
