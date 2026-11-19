@@ -184,7 +184,8 @@ describe("host relay admin", () => {
 		const request = signed("viewers");
 		expect((await rawRequest(relay.hostPort, request, {})).status).toBe(200);
 		expect((await rawRequest(relay.hostPort, request, {})).status).toBe(403);
-		for (const headers of [{ Origin: "http://evil.example" }, { "X-Forwarded-For": "127.0.0.1" }, { "X-Forwarded-Host": "evil.example" }, { "Tailscale-Funnel-Request": "?1" }, { Forwarded: "for=127.0.0.1" }]) {
+		const forwardedHeaders: Record<string, string>[] = [{ Origin: "http://evil.example" }, { "X-Forwarded-For": "127.0.0.1" }, { "X-Forwarded-Host": "evil.example" }, { "Tailscale-Funnel-Request": "?1" }, { Forwarded: "for=127.0.0.1" }];
+		for (const headers of forwardedHeaders) {
 			expect((await rawRequest(relay.hostPort, signed("viewers"), headers)).status).toBe(403);
 		}
 		expect((await rawRequest(relay.guestPort, signed("viewers"), guestHeaders(relay))).status).toBe(404);

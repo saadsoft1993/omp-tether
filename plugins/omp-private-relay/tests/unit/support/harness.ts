@@ -419,7 +419,7 @@ export function parseServerFrames(buf: Buffer, onFrame: (opcode: number, payload
 export async function rawGuest(relay: Relay, room: string): Promise<RawGuest> {
 	const sock = net.connect(relay.guestPort, "127.0.0.1");
 	const upgraded = Promise.withResolvers<void>();
-	let buf = Buffer.alloc(0);
+	let buf: Buffer = Buffer.alloc(0);
 	let headDone = false;
 	let sawClose = false;
 	let isClosed = false;
@@ -459,7 +459,7 @@ export async function rawGuest(relay: Relay, room: string): Promise<RawGuest> {
 export async function throttledGuest(relay: Relay, room: string, bytesPerTick: number, tickMs: number): Promise<{ frames(): number; bytes(): number; closed(): boolean; destroy(): void }> {
 	const sock = net.connect(relay.guestPort, "127.0.0.1");
 	const upgraded = Promise.withResolvers<void>();
-	let buf = Buffer.alloc(0);
+	let buf: Buffer = Buffer.alloc(0);
 	let headDone = false;
 	let count = 0;
 	let total = 0;
