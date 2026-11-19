@@ -6,6 +6,8 @@ All notable changes to `omp-private-relay`. The protocols it implements have the
 ## 0.1.3 (2026-11-19)
 
 - Add a pinned web build for omp 19.0.0.
+- Two web-client installs running at once no longer fail now and then with `ENOENT` from the symlink check: it is one
+  `lstat` instead of an existence check followed by `lstat`.
 
 - Gzip static web client text assets when the browser supports it; set `web.compression` to `false` to disable it. Pairing and authentication responses are never compressed.
 - Guests are cut after 120 seconds without drain progress or when queue memory budgets are exceeded; the defaults are 256 MiB per connection and 1 GiB relay-wide. The browser also waits 120 seconds for the welcome, each snapshot chunk and transcript replies.

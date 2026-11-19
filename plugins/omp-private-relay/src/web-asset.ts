@@ -377,7 +377,8 @@ export function installTree(files: ReadonlyMap<string, Uint8Array>, build: WebBu
 	ensurePrivateDir(parent, { tighten: false });
 	const unsafe = servedPathProblem(parent);
 	if (unsafe) throw new WebAssetError(`${unsafe}; the web client is not installed into a directory another account could change`);
-	if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new WebAssetError(`${target} is a symlink; remove it first`);
+	// one lstat, not existsSync then lstat: another installer may swap the target away between two calls
+	if (fs.lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) throw new WebAssetError(`${target} is a symlink; remove it first`);
 	return withInstallLock(target, () => {
 		recoverLocked(target);
 		const stageName = installName(target, "new");
