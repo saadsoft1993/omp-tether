@@ -29,6 +29,7 @@ import * as path from "node:path";
 import { createAuth, type GuestAuth } from "./auth";
 import type { Config } from "./config";
 import { ensurePrivateDir, readSmallFile, UID } from "./fsutil";
+import { GzipCache, MAX_GZIP_ASSET_BYTES } from "./gzip-cache";
 import { CHECK_PREFIX, readCheckKey } from "./listener-check";
 import { DEVICES_FILE, PairingError, PairingReader, PairingWriter } from "./pairing-store";
 import { PAIR_JS, PAIR_PAGE } from "./pair-page";
@@ -239,21 +240,26 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		return new Response(body, { status, headers: { ...PLAIN_HEADERS, ...extra } });
 	}
 
-	// Cache only immutable build files, never generated pairing/auth responses. The file identity is checked on each use.
-	const gzipCache = new Map<string, { key: string; bytes: Uint8Array }>();
+	// Cache only build files, never generated pairing/auth responses.
+	const gzipCache = new GzipCache();
 	function acceptsGzip(header: string | null): boolean {
-		let wildcard = 0;
+		let wildcard: number | undefined;
 		let gzip: number | undefined;
+		let identity: number | undefined;
 		for (const part of (header ?? "").split(",")) {
 			const [name, ...params] = part.trim().toLowerCase().split(";");
-			if (name !== "gzip" && name !== "*") continue;
+			if (name !== "gzip" && name !== "identity" && name !== "*") continue;
 			const q = params.find(p => p.trim().startsWith("q="));
 			const value = q === undefined ? 1 : Number(q.trim().slice(2));
 			const quality = Number.isFinite(value) && value >= 0 && value <= 1 ? value : 0;
 			if (name === "gzip") gzip = quality;
+			else if (name === "identity") identity = quality;
 			else wildcard = quality;
 		}
-		return (gzip ?? wildcard) > 0;
+		const gzipQuality = gzip ?? wildcard ?? 0;
+		const identityQuality = identity ?? (wildcard === 0 ? 0 : 1);
+		// When neither is acceptable, ignore the preference and serve identity rather than rejecting the request.
+		return gzipQuality > 0 && gzipQuality >= identityQuality;
 	}
 
 	function staticResponse(pathname: string, method: string, acceptEncoding: string | null): Response {
@@ -287,16 +293,27 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 		};
 		if (compressible && acceptsGzip(acceptEncoding)) {
 			const st = fs.statSync(real);
-			const key = `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
-			let cached = gzipCache.get(real);
-			if (!cached || cached.key !== key) {
-				cached = { key, bytes: Bun.gzipSync(fs.readFileSync(real)) };
-				gzipCache.set(real, cached);
+			if (st.size <= MAX_GZIP_ASSET_BYTES) {
+				let buildKey = "";
+				try {
+					const build = fs.statSync(path.join(root, ".omp-private-relay-build.json"));
+					buildKey = `${build.dev}:${build.ino}:${build.size}:${build.mtimeMs}:${build.ctimeMs}`;
+				} catch {
+					// A tree without a build record still gets a generation based on its root identity.
+				}
+				const generation = `${root}:${web.dev}:${web.ino}:${buildKey}`;
+				const key = `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
+				const bytes = gzipCache.get(generation, real, key, () => {
+					const contents = readSmallFile(real, MAX_GZIP_ASSET_BYTES);
+					return contents === null ? null : Bun.gzipSync(contents);
+				});
+				if (bytes !== null) {
+					responseHeaders["Content-Encoding"] = "gzip";
+					responseHeaders["Content-Type"] = asset.type || "application/octet-stream";
+					responseHeaders["Content-Length"] = String(bytes.byteLength);
+					return new Response(method === "HEAD" ? null : bytes, { headers: responseHeaders });
+				}
 			}
-			responseHeaders["Content-Encoding"] = "gzip";
-			responseHeaders["Content-Type"] = asset.type || "application/octet-stream";
-			responseHeaders["Content-Length"] = String(cached.bytes.byteLength);
-			return new Response(method === "HEAD" ? null : cached.bytes, { headers: responseHeaders });
 		}
 		return new Response(method === "HEAD" ? null : asset, { headers: responseHeaders });
 	}
