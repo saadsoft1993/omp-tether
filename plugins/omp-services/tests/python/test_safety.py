@@ -95,6 +95,12 @@ class ManagerAnswersSystemd(_ManagerAnswers, hm.Base):
         self.assertFalse(manager.is_enabled("osvtest.x"), "no such unit file is a real answer")
         self.assertFalse(manager.is_running("osvtest.x"))
 
+    def test_newer_systemd_not_found_word_means_no_unit_file(self):
+        manager = make_manager("systemd", self.s.env, sleep=lambda s: None)
+        (self.s.fake / "systemd-not-found-word").write_text("")
+        self.assertFalse(manager.is_enabled("osvtest.x"), "systemd 259 prints not-found for a unit with no file")
+        self.assertFalse(manager.is_running("osvtest.x"))
+
 
 # ---------------------------------------------------------------------------------------------------------------------
 # network deadlines

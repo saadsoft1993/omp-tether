@@ -180,8 +180,9 @@ class Systemd(ServiceManager):
         return f"{label}{self.suffix}"
 
     ENABLED_WORDS = frozenset({"enabled", "enabled-runtime", "alias"})
+    # "not-found": systemd 25x answers a unit with no file this way on stdout (exit 4), older ones on stderr only.
     DISABLED_WORDS = frozenset(
-        {"disabled", "masked", "masked-runtime", "linked", "linked-runtime", "static", "indirect"}
+        {"disabled", "masked", "masked-runtime", "linked", "linked-runtime", "static", "indirect", "not-found"}
     )
     # What is-active may say. "inactive" and "failed" are the only words that mean the unit is not running; "active" is
     # running; the rest are a unit switching state, which is neither stopped nor safely running.

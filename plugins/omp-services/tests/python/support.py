@@ -96,6 +96,9 @@ if cmd in ("is-enabled", "is-active") and (d / "manager-down").exists():
     sys.exit(1)
 if cmd == "is-enabled":
     if not state.exists():
+        if (d / "systemd-not-found-word").exists():  # systemd 25x: the word on stdout, exit 4
+            print("not-found")
+            sys.exit(4)
         print("Failed to get unit file state for " + unit + ".service: No such file or directory", file=sys.stderr)
         sys.exit(1)
     enabled = not word.endswith("-disabled")
