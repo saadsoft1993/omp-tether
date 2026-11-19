@@ -305,7 +305,7 @@ export function startRelay(config: Config, opts: RelayOptions = {}): RelayHandle
 				const key = `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
 				const bytes = gzipCache.get(generation, real, key, () => {
 					const contents = readSmallFile(real, MAX_GZIP_ASSET_BYTES);
-					return contents === null ? null : Bun.gzipSync(contents);
+					return contents === null ? null : Bun.gzipSync(Uint8Array.from(contents));
 				});
 				if (bytes !== null) {
 					responseHeaders["Content-Encoding"] = "gzip";

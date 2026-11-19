@@ -4,13 +4,13 @@ export const MAX_GZIP_CACHE_BYTES = 16 * 1024 * 1024;
 
 export class GzipCache {
 	private generation = "";
-	private entries = new Map<string, { key: string; bytes: Uint8Array }>();
+	private entries = new Map<string, { key: string; bytes: Uint8Array<ArrayBuffer> }>();
 	private size = 0;
 
 	get byteLength(): number { return this.size; }
 	get count(): number { return this.entries.size; }
 
-	get(generation: string, file: string, key: string, load: () => Uint8Array | null): Uint8Array | null {
+	get(generation: string, file: string, key: string, load: () => Uint8Array<ArrayBuffer> | null): Uint8Array<ArrayBuffer> | null {
 		if (this.generation !== generation) {
 			this.entries.clear();
 			this.size = 0;

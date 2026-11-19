@@ -40,7 +40,9 @@ describe("static compression", () => {
 			["*;q=1, identity;q=0", "gzip"],
 		] as const) {
 			const response = await rawRequest(relay.guestPort, "/abcd1234.js", guestHeaders(relay, { "Accept-Encoding": encoding }));
-			expect(response.headers["content-encoding"]).toBe(expected);
+			const got = response.headers["content-encoding"];
+			if (expected === undefined) expect(got).toBeUndefined();
+			else expect(got).toBe(expected);
 		}
 	});
 
