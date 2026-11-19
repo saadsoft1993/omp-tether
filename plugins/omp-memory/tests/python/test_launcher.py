@@ -20,7 +20,7 @@ class LauncherTest(ScratchCase):
     def test_help_and_version_exit_0(self):
         self.assertEqual(self.s.run("--help").code, 0)
         r = self.s.run("--version")
-        self.assertEqual((r.code, r.out.strip()), (0, "omp-memory 0.1.0"))
+        self.assertEqual((r.code, r.out.strip()), (0, "omp-memory 0.1.1"))
 
     def test_unknown_command_exits_2_on_stderr(self):
         r = self.s.run("frobnicate")
@@ -56,7 +56,7 @@ class LauncherTest(ScratchCase):
         link = self.s.bin / "omp-memory"
         os.symlink(LAUNCHER, link)
         proc = subprocess.run([str(link), "--version"], env=self.s.env(), capture_output=True, text=True, check=False)
-        self.assertEqual((proc.returncode, proc.stdout.strip()), (0, "omp-memory 0.1.0"))
+        self.assertEqual((proc.returncode, proc.stdout.strip()), (0, "omp-memory 0.1.1"))
 
     def test_the_launcher_is_executable_and_shell_only(self):
         mode = LAUNCHER.stat().st_mode

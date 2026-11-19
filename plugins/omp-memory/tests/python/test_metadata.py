@@ -94,8 +94,8 @@ class RepositoryFiles(unittest.TestCase):
             self.assertEqual(mine, sibling.read_text(), str(sibling))
 
     def test_compat_json_is_honest_about_what_was_run(self):
-        self.assertEqual(self.compat["ompTested"], ["18.18.0", "18.18.3"])  # the real omp binaries that were run
-        self.assertEqual(self.compat["ompVerifiedRange"], {"first": "18.18.0", "last": "18.18.8"})
+        self.assertEqual(self.compat["ompTested"], ["18.18.0", "18.18.3", "19.0.0"])
+        self.assertEqual(self.compat["ompVerifiedRange"], {"first": "18.18.0", "last": "19.0.0"})
         self.assertEqual(self.compat["platforms"], ["darwin", "linux"])
         tested = " ".join(self.compat["platformsTested"]).lower()
         self.assertIn("darwin-arm64", tested)

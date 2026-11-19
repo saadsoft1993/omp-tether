@@ -2,6 +2,10 @@
 
 All notable changes to `omp-memory`.
 
+## 0.1.1 (2026-11-19)
+
+- Verify published Mnemopi libraries through 19.0.0 and the real omp 19.0.0 with the synthetic-data smoke cycle.
+
 ## 0.1.0 (2026-11-12)
 
 First release, **beta**. The most recent changes are verified by tests only and there has been no third-party audit; use `--apply` only after a verified backup (`omp-memory backup --apply`).

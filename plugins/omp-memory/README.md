@@ -5,7 +5,7 @@ folder (`~/.omp/agent/memories/mnemopi/banks/<bank>/mnemopi.db`). `omp-memory` l
 shows what other coding tools have stored about the same projects (Claude Code, claude-mem, Codex), **imports** Claude Code memory
 into the right banks, backs the banks up, and checks that they are healthy.
 
-> **Beta.** `omp-memory` 0.1.0 writes your real omp memory banks. It has been tested (the suites, a smoke cycle on synthetic data on macOS and Linux, and a write test against nine omp library releases), but its most recent changes are verified by those tests only, and no third-party audit has been done. **Make a verified backup of your banks (`omp-memory backup --apply`, then `omp-memory restore-drill`) before any `--apply`, and read the dry run first.** Known limits are listed under [Known limits of this beta](#known-limits-of-this-beta).
+> **Beta.** `omp-memory` 0.1.1 writes your real omp memory banks. It has been tested (the suites, a smoke cycle on synthetic data on macOS and Linux, and a write test against omp library releases), but its most recent changes are verified by those tests only, and no third-party audit has been done. **Make a verified backup of your banks (`omp-memory backup --apply`, then `omp-memory restore-drill`) before any `--apply`, and read the dry run first.** Known limits are listed under [Known limits of this beta](#known-limits-of-this-beta).
 
 - **Read-only until you say otherwise.** Only `import import --apply` and `import undo --apply` write a bank, and nothing adds `--apply` for you.
   Even then the import refuses without a dry run from the last 24 hours and, when it writes into a bank that already holds anything of yours, a verified backup from the last 24 hours ([Safety gates](#safety-gates)).
@@ -18,7 +18,7 @@ into the right banks, backs the banks up, and checks that they are healthy.
 
 | You need | Version | Notes |
 |---|---|---|
-| [omp](https://github.com/can1357/oh-my-pi) | 18.18.0 to 18.18.8 (the library releases are verified; the real omp was run at 18.18.0 and 18.18.3); other releases only if they pass the write test | The importer writes through omp's own Mnemopi library at **exactly** your omp's version, so it follows your omp (see [`setup`](#4-fetch-the-library-once-setup)) |
+| [omp](https://github.com/can1357/oh-my-pi) | 18.18.0 to 19.0.0 (the published library releases are verified; the real omp was run at 18.18.0, 18.18.3 and 19.0.0); other releases only if they pass the write test | The importer writes through omp's own Mnemopi library at **exactly** your omp's version, so it follows your omp (see [`setup`](#4-fetch-the-library-once-setup)) |
 | [Bun](https://bun.sh) | 1.4.4 or newer | Runs the importer. omp's built-in Bun is not used. Found on `PATH`, in `~/.bun/bin`, in `~/.cache/omp-relay/bun-*/` (the one `omp-private-relay` downloads) or in Homebrew; or set `OMP_MEMORY_BUN`. `curl -fsSL https://bun.sh/install \| bash -s bun-v1.4.4` installs one (it needs `curl`, `unzip` and `ca-certificates`; on Debian or Ubuntu: `apt install curl unzip ca-certificates`) |
 | Python | 3.10 or newer | Standard library only. macOS's own `/usr/bin/python3` is 3.9 and too old; set `OMP_MEMORY_PYTHON` to an absolute path to force one |
 | `sqlite3`, and `shasum` or `sha256sum` | any | Used by the backup scripts (Debian or Ubuntu: `apt install sqlite3`) |
@@ -40,7 +40,7 @@ ln -s ~/.omp/plugins/node_modules/omp-memory/bin/omp-memory ~/.local/bin/omp-mem
 omp-memory --version
 ```
 
-Expected: `omp-memory 0.1.0`. (To install from a local checkout, give `omp plugin marketplace add` the checkout's path.) Writes: omp's plugin folder only.
+Expected: `omp-memory 0.1.1`. (To install from a local checkout, give `omp plugin marketplace add` the checkout's path.) Writes: omp's plugin folder only.
 
 ### 2. Ask `doctor` what is missing
 
@@ -372,7 +372,7 @@ No analytics, no crash reports, no update check. Nothing is fetched at install t
 - **Secrets without a recognisable shape.** A bare key of 24 or more characters with no prefix or key word in a name is not detected; neither is a password written in prose. `auth` and `credential` count as key words in the command line but not in the importer.
 - **`setup` and the shared embedding cache.** On a failed embedding step `setup` removes only its own token file and the empty folders it created itself, after re-checking each, and keeps everything else in omp's embedding runtime folder. It can leave a partly filled runtime folder behind; remove it by hand if omp cannot embed afterwards.
 - **Open banks.** The check that no omp session has a bank open is best effort (see the safety gates).
-- **Not tested:** Linux x86-64, musl or busybox userlands, Windows (not supported), omp versions other than 18.18.0 and 18.18.3 with the real binary.
+- **Not tested:** Linux x86-64, musl or busybox userlands, Windows (not supported), omp versions other than 18.18.0, 18.18.3 and 19.0.0 with the real binary.
 
 ## Uninstall
 
@@ -423,7 +423,7 @@ omp's own banks are listed, labelled, backed up and verified.
 | Linux arm64, Ubuntu 24.04 container as a non-root user (Bun 1.4.4, Python 3.12, `sqlite3` 3.45, with and without `lsof`) | tested: importer tests, plugin Python suite, the full smoke cycle on synthetic data |
 | Linux x64, other distributions, musl or busybox userland | **not tested**. Expected to work (the scripts use only POSIX tools plus `sqlite3` and a SHA-256 tool), but unverified; on x64 see the CUDA note under [Network](#network-and-privacy) |
 | Windows | **not supported** |
-| omp 18.18.0 and 18.18.3 | **tested** with the real binaries and the matching `@oh-my-pi/pi-mnemopi` releases (structural SQL check, write test, importer tests, smoke cycle). The library releases 18.18.0 to 18.18.8 (all nine) pass the structural SQL check, the write test and the importer's Bun suite |
+| omp 18.18.0, 18.18.3 and 19.0.0 | **tested** with the real binaries and the matching `@oh-my-pi/pi-mnemopi` releases. Every published library release from 18.18.0 to 19.0.0 passes the structural SQL check, write test and importer suite; the 19.0.0 binary also passed the synthetic-data smoke cycle |
 | any other omp version | not tested. The write test decides at run time: a library that passes is used, one that fails is refused with the failing step |
 
 The machine-readable record is [`compat.json`](https://github.com/saadsoft1993/omp-tether/blob/main/compat.json) and [`docs/compat.md`](https://github.com/saadsoft1993/omp-tether/blob/main/docs/compat.md) in the repository.

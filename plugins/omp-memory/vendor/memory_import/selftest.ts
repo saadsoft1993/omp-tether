@@ -27,7 +27,7 @@ import { scrubText, scrubValue } from "./sink";
 export const SELFTEST_VERSION = 2;
 
 /** The omp releases the importer has been run against, version by version (see compat.json): a message, not a gate. */
-export const VERIFIED_OMP_RANGE = { first: "18.18.0", last: "18.18.8" } as const;
+export const VERIFIED_OMP_RANGE = { first: "18.18.0", last: "19.0.0" } as const;
 
 export type EmbedderKind = "stub" | "real";
 
