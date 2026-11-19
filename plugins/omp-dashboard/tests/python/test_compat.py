@@ -19,6 +19,12 @@ def _versions(text: str) -> list[str]:
     return re.findall(r"\d+\.\d+\.\d+", text)
 
 
+def _compat_versions(section: str) -> list[str]:
+    tested = re.search(r"Tested with omp ((?:\d+\.\d+\.\d+|and|[, ])+)", section)
+    assert tested is not None, section
+    return _versions(tested.group(1))
+
+
 class CompatSources(unittest.TestCase):
     def test_the_code_lists_the_versions_compat_json_lists(self) -> None:
         self.assertEqual(list(TESTED_OMP), COMPAT["ompTested"])
@@ -40,13 +46,14 @@ class CompatSources(unittest.TestCase):
     def test_the_compat_page_names_exactly_those_versions(self) -> None:
         page = (REPO / "docs" / "compat.md").read_text()
         section = page.split("### `omp-dashboard`")[1].split("###")[0]
-        tested = re.search(r"Tested with omp ([0-9., ]+(?:and [0-9.]+)?)", section)
-        assert tested is not None, section
-        self.assertEqual(_versions(tested.group(0)), COMPAT["ompTested"])
+        self.assertEqual(_compat_versions(section), COMPAT["ompTested"])
 
     def test_mismatched_major_version_is_detected(self) -> None:
         with self.assertRaises(AssertionError):
-            self.assertEqual(_versions("18.18.0, 18.18.3 and 20.0.0"), COMPAT["ompTested"])
+            self.assertEqual(
+                _compat_versions("Tested with omp 18.18.0, 18.18.3 and 19.0.0 and 20.0.0."),
+                COMPAT["ompTested"],
+            )
 
 
 if __name__ == "__main__":
