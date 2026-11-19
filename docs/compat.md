@@ -55,7 +55,10 @@ macOS and Linux (`omp-memory`: macOS arm64 and an Ubuntu 24.04 arm64 container w
 | `session-control` | 1 | [`protocol/control-1.md`](protocol/control-1.md) |
 | `health` | 1 | [`protocol/health-1.md`](protocol/health-1.md) |
 | `services` | 1 | [`protocol/services-1.md`](protocol/services-1.md) |
+| `config` | 1 | — |
 | `pairing-store` | 1 | [`protocol/pairing-store-1.md`](protocol/pairing-store-1.md) |
 | `relay-check` | 1 | [`protocol/relay-check-1.md`](protocol/relay-check-1.md) |
+| `dashboard-config` | 1 | — |
+| `ui-build` | 1 | — |
 
 Protocol numbers change only by spec, independently of plugin versions.
