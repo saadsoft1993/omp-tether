@@ -351,7 +351,9 @@ class SessionControlInRealOmp(unittest.TestCase):
             lambda: "Plan mode" in self.omp.text() or "plan mode" in self.omp.text(), timeout=30, what="plan mode"
         )
         # omp reviews the newest local://*plan.md of the session: write one where the session keeps its local files.
-        files = list((self.scratch.home / ".omp" / "agent" / "sessions").rglob("*.jsonl"))
+        files = [
+            p for p in (self.scratch.home / ".omp" / "agent" / "sessions").rglob("*.jsonl") if p.name != "changes.jsonl"
+        ]
         self.assertEqual(len(files), 1)
         local = files[0].with_suffix("") / "local"
         local.mkdir(parents=True, exist_ok=True)

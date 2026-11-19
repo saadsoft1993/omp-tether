@@ -232,7 +232,9 @@ class PtyOmp:
         return [h for h in json.loads(r.stdout).get("hosts") or [] if h.get("pid") == self.pid]
 
     def session_entries(self) -> list[dict]:
-        files = list((self.scratch.home / ".omp" / "agent" / "sessions").rglob("*.jsonl"))
+        files = [
+            p for p in (self.scratch.home / ".omp" / "agent" / "sessions").rglob("*.jsonl") if p.name != "changes.jsonl"
+        ]
         if len(files) != 1:
             return []
         return [json.loads(line) for line in files[0].read_text().splitlines() if line.strip()]
