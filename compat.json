@@ -143,6 +143,12 @@
 			],
 			"produces": [],
 			"note": "Command line only: no extension. The network is used by `omp-memory setup` (the npm registry for the library; then the embedding runtime from npm and the model from huggingface.co, once), by the embedding step of `import --apply` when setup was skipped, and by the optional export-hindsight when run with --apply. The code under vendor/ is copied byte for byte from a separate source tree (scripts/sync-vendor.sh, OMP_MEMORY_SOURCE_DIR) and a test fails when it drifts. NOTICE lists the code copied from omp and the packages setup downloads."
+		},
+		"omp-workflow": {
+			"version": "0.1.0",
+			"platforms": ["darwin", "linux"],
+			"python": ">=3.10",
+			"ompCli": ["omp config list --scope global --json", "omp config get/set/reset", "omp config path"]
 		}
 	}
 }

@@ -31,6 +31,7 @@ plugins/*/patches/**
 plugins/*/scripts/**
 plugins/*/web-builds.json
 plugins/*/skills/**
+plugins/*/templates/**
 plugins/*/vendor/**
 scripts/**
 tools/public-tree-check/**

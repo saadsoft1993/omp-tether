@@ -1,0 +1,9 @@
+{
+	"name": "omp-workflow",
+	"version": "0.1.0",
+	"description": "Optional workflow settings, agents and skills for omp.",
+	"license": "MIT",
+	"keywords": ["omp-package"],
+	"bin": { "omp-workflow": "./bin/omp-workflow" },
+	"files": ["bin", "python", "templates", "tests", "README.md", "SECURITY.md", "CHANGELOG.md", "LICENSE"]
+}

@@ -3,5 +3,6 @@
 	"omp-services": { "commands": ["omp-services"] },
 	"omp-private-relay": { "extensions": false },
 	"omp-dashboard": { "extensions": false },
-	"omp-memory": { "extensions": false }
+	"omp-memory": { "extensions": false },
+	"omp-workflow": { "extensions": false }
 }

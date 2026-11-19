@@ -11,6 +11,7 @@ catalog; none of them does anything until you turn it on.
 | [`omp-private-relay`](plugins/omp-private-relay) | A Collab relay that runs on your own machine, a patched browser client for it, and per-browser pairing, so session links never go through omp's public relay | 0.1.2 (beta) |
 | [`omp-dashboard`](plugins/omp-dashboard) | A local dashboard for your own sessions: list, open (through your private relay), stop, rename, kill and start them, with per-browser pairing; its own hub (Python, standard library only) and page | 0.1.0 (beta) |
 | [`omp-memory`](plugins/omp-memory) | A command line for omp's local memory banks: list banks (with folder labels) and what the memory files of other coding tools hold, import them into the banks, back them up and check them. Read-only until you pass `--apply`; ships a skill that tells an agent how to use it safely | 0.1.0 (beta) |
+| [`omp-workflow`](plugins/omp-workflow) | Optional workflow settings, model roles, agents and skills for your omp profile | 0.1.0 (beta) |
 
 ## Install a plugin
 

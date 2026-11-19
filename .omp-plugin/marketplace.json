@@ -50,6 +50,15 @@
 			"license": "MIT",
 			"category": "productivity",
 			"keywords": ["memory", "mnemopi", "import", "backup"]
+		},
+		{
+			"name": "omp-workflow",
+			"source": "./plugins/omp-workflow",
+			"version": "0.1.0",
+			"description": "Install a configurable workflow, model roles, agents and skills into your omp profile.",
+			"license": "MIT",
+			"category": "productivity",
+			"keywords": ["workflow", "agents", "skills"]
 		}
 	]
 }
