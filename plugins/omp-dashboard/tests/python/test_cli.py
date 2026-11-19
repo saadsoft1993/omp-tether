@@ -377,7 +377,7 @@ class Doctor(ScratchTestCase):
         s.fake_state["version"] = "omp/17.0.0"
         s.save_fake()
         self.assertEqual(self.findings(s)["omp"].level, "fail")
-        s.fake_state["version"] = "omp/19.0.0"
+        s.fake_state["version"] = "omp/20.0.0"
         s.save_fake()
         self.assertEqual(self.findings(s)["omp"].level, "warn")
         s.fake_state["fail"] = True
