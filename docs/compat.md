@@ -39,6 +39,12 @@ Tested with omp 18.18.0, 18.18.3 and 19.0.0. It uses omp through its command lin
 
 **Tested** on **macOS arm64** (MacBook and Mac mini) and in an **Ubuntu 24.04 arm64 container** as a non-root user; **not tested** on Linux x64, on a Linux whose userland is neither GNU nor BSD (musl, busybox), or with other omp versions. Windows is not supported. On Linux x64, the install script of `onnxruntime-node` (fetched by `setup` through omp's library) downloads CUDA binaries from GitHub unless `ONNXRUNTIME_NODE_INSTALL_CUDA=skip` is set; that was read from the script and not run.
 
+### `omp-workflow`
+
+Tested with omp 19.0.0. It uses omp through its command line only (`omp config list --scope global --json`,
+`omp config get`, `set` and `reset`, `omp config path`, and `omp models --json` to check which models are available).
+A setting this omp does not know is skipped and reported, not treated as an error.
+
 ## Bun
 
 The extension runs on the Bun that omp embeds (1.4.4 in omp 19.0.0). `omp-memory`'s importer runs on a Bun 1.4.4 or newer that it finds on `PATH` or in the usual places (never the omp binary: the importer runs `omp --version` itself). So does `omp-private-relay`: it runs as `BUN_BE_BUN=1 <omp> <script>`, never needs a separate Bun or Node, and refuses to start on a Bun older than 1.4.4 (the version collab-web's build needs). Running the tests here needs Bun 1.4.4 or newer.

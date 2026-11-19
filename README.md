@@ -6,11 +6,11 @@ catalog; none of them does anything until you turn it on.
 
 | Plugin | What it does | Status |
 |---|---|---|
-| [`omp-session-control`](plugins/omp-session-control) | An extension that lets a local program stop the running turn of an interactive session, rename it and answer its plan review, over a private Unix socket | 0.3.0 (beta) |
-| [`omp-services`](plugins/omp-services) | Sets up the background services other plugins need (launchd and `systemd --user` units), checks them (`doctor`), and runs a heartbeat that pings a URL of your choosing with the result of the health checks plugins contribute | 0.1.0 (beta) |
-| [`omp-private-relay`](plugins/omp-private-relay) | A Collab relay that runs on your own machine, a patched browser client for it, and per-browser pairing, so session links never go through omp's public relay | 0.1.2 (beta) |
-| [`omp-dashboard`](plugins/omp-dashboard) | A local dashboard for your own sessions: list, open (through your private relay), stop, rename, kill and start them, with per-browser pairing; its own hub (Python, standard library only) and page | 0.1.0 (beta) |
-| [`omp-memory`](plugins/omp-memory) | A command line for omp's local memory banks: list banks (with folder labels) and what the memory files of other coding tools hold, import them into the banks, back them up and check them. Read-only until you pass `--apply`; ships a skill that tells an agent how to use it safely | 0.1.0 (beta) |
+| [`omp-session-control`](plugins/omp-session-control) | An extension that lets a local program stop the running turn of an interactive session, rename it and answer its plan review, over a private Unix socket | 0.4.1 (beta) |
+| [`omp-services`](plugins/omp-services) | Sets up the background services other plugins need (launchd and `systemd --user` units), checks them (`doctor`), and runs a heartbeat that pings a URL of your choosing with the result of the health checks plugins contribute | 0.1.2 (beta) |
+| [`omp-private-relay`](plugins/omp-private-relay) | A Collab relay that runs on your own machine, a patched browser client for it, and per-browser pairing, so session links never go through omp's public relay | 0.1.3 (beta) |
+| [`omp-dashboard`](plugins/omp-dashboard) | A local dashboard for your own sessions: list, open (through your private relay), stop, rename, kill and start them, with per-browser pairing; its own hub (Python, standard library only) and page | 0.2.0 (beta) |
+| [`omp-memory`](plugins/omp-memory) | A command line for omp's local memory banks: list banks (with folder labels) and what the memory files of other coding tools hold, import them into the banks, back them up and check them. Read-only until you pass `--apply`; ships a skill that tells an agent how to use it safely | 0.1.1 (beta) |
 | [`omp-workflow`](plugins/omp-workflow) | Optional workflow settings, model roles, agents and skills for your omp profile | 0.1.0 (beta) |
 
 ## Install a plugin
@@ -26,6 +26,9 @@ path of the checkout.
 
 Remove it with `omp plugin uninstall omp-session-control@omp-tether`; each plugin's README says what data it leaves behind
 and how to purge it.
+
+To set up several plugins and the optional workflow pack in one go, paste [`INSTALL-PROMPT.md`](INSTALL-PROMPT.md) into
+a new omp session; it asks which pieces you want before it changes anything.
 
 ## What to know first
 

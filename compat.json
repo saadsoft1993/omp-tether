@@ -146,9 +146,10 @@
 		},
 		"omp-workflow": {
 			"version": "0.1.0",
+			"ompTested": ["19.0.0"],
 			"platforms": ["darwin", "linux"],
 			"python": ">=3.10",
-			"ompCli": ["omp config list --scope global --json", "omp config get/set/reset", "omp config path"]
+			"ompCli": ["omp config list --scope global --json", "omp config get/set/reset", "omp config path", "omp models --json"]
 		}
 	}
 }

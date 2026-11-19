@@ -1,5 +1,6 @@
 # Paths allowed in the published tree. Anything not matched here fails the check; the tool's built-in deny list wins.
 README.md
+INSTALL-PROMPT.md
 LICENSE
 SECURITY.md
 .gitignore
