@@ -1585,8 +1585,8 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 					await advisor.setModel(target);
 				} catch (error) {
 					const message = error instanceof Error ? error.message : "";
-					if (message.startsWith("turn the advisor on first")) throw new ControlError("invalid_args", message);
-					if (message.startsWith("the advisor did not start on that model")) throw new ControlError("failed", message);
+					if (message.startsWith("turn the advisor on first")) throw new ControlError("invalid_args", "turn the advisor on first, then pick its model");
+					if (message.startsWith("the advisor did not start on that model")) throw new ControlError("failed", "the advisor did not start on that model; WATCHDOG.yml may pin its model");
 					throw error;
 				}
 			}

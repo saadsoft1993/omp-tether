@@ -119,19 +119,27 @@ describe("target pinning", () => {
 		["set-model", { provider: "openai", id: "gpt-6.1-sol" }],
 		["set-thinking", { level: "low" }],
 		["set-mode", { mode: "plan", action: "enter" }],
+		["set-advisor", { enabled: true, provider: "openai", id: "gpt-6.1-sol" }],
 	];
 
 	test("every command is refused for a stale session or generation, and omp is not called", async () => {
-		await boot();
+		const advisorCalls: string[] = [];
+		await boot({}, {
+			getState: () => ({ enabled: false, active: false, model: null, advisors: [] }),
+			setEnabled: () => { advisorCalls.push("enabled"); },
+			setModel: () => { advisorCalls.push("model"); },
+		});
 		for (const [op, args] of CASES) {
 			expect((await c.request(frame(op, args, { sessionId: "other" }))).code).toBe("stale_session");
 			expect((await c.request(frame(op, args, { generation: generation + 1 }))).code).toBe("stale_generation");
 			expect((await c.request(frame(op, args, { sessionId: undefined }))).code).toBe("stale_session");
+			expect((await c.request(frame(op, args, { generation: undefined }))).code).toBe("stale_generation");
 		}
 		expect(host.compactCalls).toEqual([]);
 		expect(host.setModelCalls).toEqual([]);
 		expect(host.thinkingCalls).toEqual([]);
 		expect(host.modeCalls).toEqual([]);
+		expect(advisorCalls).toEqual([]);
 	});
 
 	test("a switch between the request and its turn in the chain refuses the queued change", async () => {
@@ -640,13 +648,13 @@ describe("set-advisor", () => {
 		}
 	});
 
-	test("maps known model errors and hides unknown errors", async () => {
-		let message = "the advisor did not start on that model; WATCHDOG.yml may pin its model";
+	test("maps known model errors to fixed messages and hides host diagnostics", async () => {
+		let message = "the advisor did not start on that model; secret-token";
 		await boot({}, { getState: () => ({ enabled: true, active: true, model: null, advisors: [] }), setEnabled: () => {}, setModel: () => { throw new Error(message); } });
 		const args = { provider: "openai", id: "gpt-6.1-sol" };
-		expect(await call("set-advisor", args)).toMatchObject({ code: "failed", message });
-		message = "turn the advisor on first, then pick its model";
-		expect(await call("set-advisor", args)).toMatchObject({ code: "invalid_args", message });
+		expect(await call("set-advisor", args)).toMatchObject({ code: "failed", message: "the advisor did not start on that model; WATCHDOG.yml may pin its model" });
+		message = "turn the advisor on first; secret-token";
+		expect(await call("set-advisor", args)).toMatchObject({ code: "invalid_args", message: "turn the advisor on first, then pick its model" });
 		message = "secret";
 		expect(await call("set-advisor", args)).toMatchObject({ code: "failed", message: "omp could not run set-advisor" });
 	});
@@ -841,6 +849,23 @@ describe("set-mode", () => {
 });
 
 describe("serialization", () => {
+	test("a timed-out advisor change blocks mutations until the host settles", async () => {
+		const { promise, resolve } = Promise.withResolvers<void>();
+		const calls: string[] = [];
+		await boot({ timerScale: 0.01, env: { OMP_SESSION_CONTROL_IDLE_MS: "3600000" } }, {
+			getState: () => ({ enabled: false, active: false, model: null, advisors: [] }),
+			setEnabled: async () => { calls.push("enabled"); await promise; },
+			setModel: () => { calls.push("model"); },
+		});
+		expect((await call("set-advisor", { enabled: true })).code).toBe("timeout");
+		expect((await call("set-advisor", { provider: "openai", id: "gpt-6.1-sol" })).code).toBe("mutation_pending");
+		expect((await call("set-thinking", { level: "low" })).code).toBe("mutation_pending");
+		expect(calls).toEqual(["enabled"]);
+		expect(host.thinkingCalls).toEqual([]);
+		resolve();
+		await host.waitFor(async () => (await call("set-thinking", { level: "low" })).ok === true, "advisor mutation to settle");
+	});
+
 	test("changes sent back to back run in order, one at a time", async () => {
 		await boot();
 		const replies = await Promise.all([

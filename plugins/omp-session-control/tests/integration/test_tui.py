@@ -342,7 +342,8 @@ class SessionControlInRealOmp(unittest.TestCase):
                 "set-model",
                 "set-thinking",
                 "set-mode",
-            ] + (["set-advisor"] if self.op("session-info").get("advisor") is not None else []),
+            ]
+            + (["set-advisor"] if self.op("session-info").get("advisor") is not None else []),
         )
         self.assertIsNone(reg["planReview"])
         self.assertEqual(self.op("plan-review", {"offset": 0}), {"open": False})

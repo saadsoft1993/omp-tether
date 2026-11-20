@@ -6,6 +6,7 @@ only by spec; see `docs/protocol/control-1.md` in the repository.
 ## 0.5.0 (2026-11-20)
 
 - Adds `set-advisor` and an `advisor` field in `session-info`: see and change a session's advisor (on/off, model) from the dashboard. Needs omp with `ctx.advisor`.
+- Return fixed messages for recognised advisor errors without exposing host diagnostics.
 
 ## 0.4.1 (2026-11-19)
 
