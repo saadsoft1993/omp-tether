@@ -21,7 +21,7 @@
 	},
 	"plugins": {
 		"omp-session-control": {
-			"version": "0.4.1",
+			"version": "0.5.0",
 			"ompTested": ["18.18.0", "18.19.0"],
 			"extensionId": "extension-module:omp-session-control",
 			"protocols": ["session-control/1"],
@@ -35,6 +35,7 @@
 				"ExtensionAPI.on: plan_review_requested, plan_review_resolved",
 				"ExtensionContext.getPendingPlanReview, resolvePlanReview (optional: plan-review and plan-answer are offered only when both exist)",
 				"ExtensionContext.compact, models.list, models.current, model, sessionModes.getState, sessionModes.set (each optional: compact, session-info and set-mode are offered only when the host has them)",
+				"ExtensionContext.advisor.getState, setEnabled, setModel (optional: set-advisor is offered only when these and models.list exist)",
 				"ExtensionAPI.setModel, setThinkingLevel, getThinkingLevel (optional: set-model and set-thinking are offered only when the host has them)"
 			],
 			"ompInternals": [

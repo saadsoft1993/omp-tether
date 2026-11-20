@@ -3,6 +3,10 @@
 All notable changes to `omp-session-control`. The wire protocol has its own number (`session-control/1`) and changes
 only by spec; see `docs/protocol/control-1.md` in the repository.
 
+## 0.5.0 (2026-11-20)
+
+- Adds `set-advisor` and an `advisor` field in `session-info`: see and change a session's advisor (on/off, model) from the dashboard. Needs omp with `ctx.advisor`.
+
 ## 0.4.1 (2026-11-19)
 
 - Build against omp 19.0.0's types: the stop deadline's timer callback no longer passes timer arguments through to the

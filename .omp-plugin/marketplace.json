@@ -9,7 +9,7 @@
 		{
 			"name": "omp-session-control",
 			"source": "./plugins/omp-session-control",
-			"version": "0.4.1",
+			"version": "0.5.0",
 			"description": "Stop the running turn of an omp session and rename it from a local dashboard, over a private Unix socket. Inert until you turn it on.",
 			"license": "MIT",
 			"category": "productivity",

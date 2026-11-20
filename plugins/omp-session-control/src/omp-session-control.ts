@@ -24,7 +24,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 export const PLUGIN_NAME = "omp-session-control";
-export const PLUGIN_VERSION = "0.4.1";
+export const PLUGIN_VERSION = "0.5.0";
 /** Wire protocol versions this build speaks (docs/protocol/control-1.md). */
 export const PROTOCOL_VERSIONS: readonly number[] = [1];
 const PROTOCOL_VERSION = 1;
@@ -35,7 +35,7 @@ export const PLAN_OPS = ["plan-review", "plan-answer"] as const;
  * Session commands. Each is offered only when the host has the API behind it (see supportsSessionOp), in this order,
  * after the base and plan operations.
  */
-export const SESSION_OPS = ["session-info", "compact", "set-model", "set-thinking", "set-mode"] as const;
+export const SESSION_OPS = ["session-info", "compact", "set-model", "set-thinking", "set-mode", "set-advisor"] as const;
 type SessionOp = (typeof SESSION_OPS)[number];
 
 const MAX_FRAME_BYTES = 64 * 1024;
@@ -94,6 +94,7 @@ const MUTATING: Readonly<Record<string, boolean>> = {
 	"set-model": true,
 	"set-thinking": true,
 	"set-mode": true,
+	"set-advisor": true,
 };
 /** Operations that must name the live session and generation (reads of the plan included: a switch between reads is refused). */
 const TARGET_CHECKED: Readonly<Record<string, true>> = {
@@ -111,6 +112,7 @@ const TARGET_CHECKED: Readonly<Record<string, true>> = {
 	"set-model": true,
 	"set-thinking": true,
 	"set-mode": true,
+	"set-advisor": true,
 };
 const MAX_REVIEW_ID_CHARS = 128;
 const MAX_REGISTRY_TITLE_CHARS = 200;
@@ -545,6 +547,7 @@ const isFn = (value: unknown): boolean => typeof value === "function";
 interface HostSurface {
 	models?: { list?: unknown; current?: unknown };
 	sessionModes?: { set?: unknown; getState?: unknown };
+	advisor?: { getState?: unknown; setEnabled?: unknown; setModel?: unknown };
 	compact?: unknown;
 }
 
@@ -562,6 +565,8 @@ function supportsSessionOp(op: SessionOp, c: unknown, pi?: unknown): boolean {
 			return isFn(api.setThinkingLevel) && isFn(api.getThinkingLevel);
 		case "set-mode":
 			return isFn(host.sessionModes?.set);
+		case "set-advisor":
+			return isFn(host.advisor?.getState) && isFn(host.advisor?.setEnabled) && isFn(host.advisor?.setModel) && isFn(host.models?.list);
 	}
 }
 
@@ -1124,6 +1129,8 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				return setThinking(c, req.args);
 			case "set-mode":
 				return setMode(c, req.args);
+			case "set-advisor":
+				return setAdvisor(c, req.args);
 			default:
 				throw new ControlError("unknown_op", `unknown op ${req.op}`);
 		}
@@ -1441,6 +1448,26 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			return null;
 		}
 	};
+	const advisorInfo = (c: ExtensionContext): unknown => {
+		try {
+			const advisor = (c as unknown as { advisor?: { getState?: () => unknown } }).advisor;
+			if (!isFn(advisor?.getState)) return null;
+			const state = advisor?.getState?.();
+			if (!state || typeof state !== "object" || !("enabled" in state) || typeof state.enabled !== "boolean" ||
+				!("active" in state) || typeof state.active !== "boolean" || !("advisors" in state) || !Array.isArray(state.advisors)) return null;
+			const statuses = ["running", "paused", "quota_exhausted", "error", "no_model"];
+			return {
+				enabled: state.enabled,
+				active: state.active,
+				model: readModel("model" in state ? state.model : undefined, false) ?? null,
+				advisors: state.advisors.slice(0, 16)
+					.filter(a => a && typeof a.name === "string" && a.name !== "")
+					.map(a => ({ name: (a.name as string).slice(0, 64), status: typeof a.status === "string" && statuses.includes(a.status) ? a.status : "error" })),
+			};
+		} catch {
+			return null;
+		}
+	};
 
 
 	const sessionInfo = (c: ExtensionContext): unknown => {
@@ -1471,6 +1498,7 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 				goal,
 				interruptMode: interruptMode(),
 				planNotes: planNotes ? notesStatus(planNotes) : null,
+				advisor: advisorInfo(c),
 			};
 		} catch (error) {
 			throw hostFailed("session-info", error);
@@ -1535,6 +1563,39 @@ export default async function ompSessionControl(pi: ExtensionAPI): Promise<void>
 			throw hostFailed("set-model", error);
 		}
 	};
+	const setAdvisor = async (c: ExtensionContext, args: Record<string, unknown>): Promise<unknown> => {
+		requireSupport("set-advisor", c);
+		const hasEnabled = Object.hasOwn(args, "enabled");
+		const hasProvider = Object.hasOwn(args, "provider");
+		const hasId = Object.hasOwn(args, "id");
+		if ((hasEnabled && typeof args.enabled !== "boolean") || hasProvider !== hasId || (!hasEnabled && !hasProvider)) {
+			throw new ControlError("invalid_args", "set-advisor needs enabled, or provider and id");
+		}
+		const provider = hasProvider ? modelArg(args.provider, "provider") : undefined;
+		const id = hasId ? modelArg(args.id, "id") : undefined;
+		try {
+			const advisor = (c as unknown as { advisor: { setEnabled: (enabled: boolean) => unknown; setModel: (model: unknown) => unknown } }).advisor;
+			const target = provider !== undefined && id !== undefined
+				? selectableModels(c).find(o => o.ref.provider === provider && o.ref.id === id)?.raw
+				: undefined;
+			if (provider !== undefined && !target) throw new ControlError("invalid_args", "that model is not available in this session");
+			if (hasEnabled) await advisor.setEnabled(args.enabled as boolean);
+			if (target !== undefined) {
+				try {
+					await advisor.setModel(target);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : "";
+					if (message.startsWith("turn the advisor on first")) throw new ControlError("invalid_args", message);
+					if (message.startsWith("the advisor did not start on that model")) throw new ControlError("failed", message);
+					throw error;
+				}
+			}
+			return { advisor: advisorInfo(c) };
+		} catch (error) {
+			throw hostFailed("set-advisor", error);
+		}
+	};
+
 
 	const setThinking = (c: ExtensionContext, args: Record<string, unknown>): unknown => {
 		requireSupport("set-thinking", c);

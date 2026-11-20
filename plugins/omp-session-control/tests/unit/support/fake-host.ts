@@ -20,6 +20,7 @@ export interface FakeContext {
 	compact?(instructions?: string): Promise<void>;
 	model?: FakeModel;
 	models?: { list(): FakeModel[]; current(): FakeModel | undefined; resolve(spec: string): FakeModel | undefined };
+	advisor?: { getState(): unknown; setEnabled(enabled: boolean): unknown; setModel(model: unknown): unknown };
 	sessionModes?: {
 		getState(): FakeModeState;
 		set(request: Record<string, unknown>): Promise<unknown>;

@@ -72,8 +72,8 @@ them, close the listener, unlink the socket and the registry entry.
   "socket": "/home/u/.config/omp-session-control/0123456789abcdef.sock",
   "sessionId": "01a1c0db-82df-745a-95c4-c1388130d934",
   "generation": 0,
-  "plugin": { "name": "omp-session-control", "version": "0.4.0" },
-  "ops": ["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer", "plan-review", "plan-answer", "plan-notes", "session-info", "compact", "set-model", "set-thinking", "set-mode"],
+  "plugin": { "name": "omp-session-control", "version": "0.5.0" },
+  "ops": ["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer", "plan-review", "plan-answer", "plan-notes", "session-info", "compact", "set-model", "set-thinking", "set-mode", "set-advisor"],
   "planReview": { "reviewId": "2f1b...", "title": "Add a widget", "openedAt": "2026-11-16T08:01:12.004Z" },
   "writtenAt": "2026-11-16T08:01:12.010Z"
 }
@@ -202,8 +202,8 @@ Read-only. `args` is ignored.
 
 ```json
 {"sessionId":"...","generation":0,"name":null,"busy":false,"compacting":false,"pid":12345,
- "protocol":1,"protocols":[1],"ops":["snapshot","abort","rename","send-message","send-status","ask-review","ask-answer","plan-review","plan-answer","plan-notes","session-info","compact","set-model","set-thinking","set-mode"],
- "plugin":{"name":"omp-session-control","version":"0.4.0"}}
+ "protocol":1,"protocols":[1],"ops":["snapshot","abort","rename","send-message","send-status","ask-review","ask-answer","plan-review","plan-answer","plan-notes","session-info","compact","set-model","set-thinking","set-mode","set-advisor"],
+ "plugin":{"name":"omp-session-control","version":"0.5.0"}}
 ```
 
 `busy` is true while a turn is running (streaming or running tools). It does **not** cover a compaction. `compacting` (plugin 0.3.0; a client MUST treat a missing field as unknown) is true while a compaction is unsettled in omp: one started by `compact`, **including after that request answered `timeout`**, or one omp started itself (auto-compaction). It is the signal to poll after a `compact` timeout, and also in `session-info`. `name` is the session's current title or `null`. `ops` is the capability list: a client MUST NOT send an operation that `ops` (or the registry `ops`) does not list: `plan-review` and `plan-answer` get `unknown_op`, the session commands of plugin 0.3.0 (`session-info`, `compact`, `set-model`, `set-thinking`, `set-mode`) get `unsupported`.
@@ -270,10 +270,10 @@ the terminal took the pick, not that what follows worked**: writing, compaction 
 still fail. An approval starts executing the plan in that session; `save` writes the plan to its default file, leaves
 plan mode and clears into a new session (the omp process keeps running).
 
-### Session commands (plugin 0.3.0)
+### Session commands
 
-Five operations that give a dashboard what `/compact`, `/model`, the thinking-level key and the plan, goal and loop
-commands give the terminal. They are not slash-command dispatch: each calls one typed omp extension API, and each is
+Six operations give a dashboard what `/compact`, `/model`, the thinking-level key, advisor and the plan, goal and loop
+commands give the terminal. `set-advisor` was added in plugin 0.5.0; the others were added in 0.3.0. They are not slash-command dispatch: each calls one typed omp extension API, and each is
 **offered only when the host has it** (`ops` says which; a client MUST NOT send the others, and one that does gets
 `unsupported`):
 
@@ -284,6 +284,7 @@ commands give the terminal. They are not slash-command dispatch: each calls one 
 | `set-model` | `pi.setModel` and `ctx.models.list` |
 | `set-thinking` | `pi.setThinkingLevel` and `pi.getThinkingLevel` |
 | `set-mode` | `ctx.sessionModes.set` (interactive sessions only) |
+| `set-advisor` | `ctx.advisor.getState`, `setEnabled`, `setModel` and `ctx.models.list` |
 
 Every one of them needs `sessionId` and `generation` (reads included: a switch between a read and a change is refused
 with `stale_session` or `stale_generation`), and the changing ones are serialized with every other changing operation.
@@ -299,7 +300,8 @@ Read-only. `args` is ignored. Result:
  "thinkingLevels":["off","minimal","low","medium","high"],
  "models":[{"provider":"anthropic","id":"claude-opus-5-5","name":"Claude Opus 5.5"}],
  "mode":{"plan":false,"goal":false,"loop":false,"vibe":false},
- "modeStatus":{"plan":"inactive","vibe":"inactive","goal":"paused","loop":"inactive"}}
+ "modeStatus":{"plan":"inactive","vibe":"inactive","goal":"paused","loop":"inactive"},
+ "advisor":{"enabled":false,"active":false,"model":null,"advisors":[{"name":"default","status":"paused"}]}}
 ```
 
 `compacting` is the same flag as in `snapshot`. `model` is `null` when no model is set. `thinkingLevel` is `null` when the host cannot say. `thinkingLevels` are the
@@ -311,6 +313,8 @@ only those that are in the list), then the rest in omp's order. At most 200, so 
 without a usable `provider` and `id` left out; the list is halved until it is under 44 KiB (the list alone, so the cut depends on the models only). `set-model` validates against exactly the list that was cut, so a model the cut dropped is `invalid_args`. `mode` is a
 boolean per built-in mode, true when its status is `active`; `modeStatus` (an added field, compatible) has the status
 itself, `inactive`, `active` or `paused`, so a client can tell a paused goal from a dropped one.
+
+`advisor` is null when unavailable. Otherwise it contains `enabled`, `active`, a model reference or null, and up to 16 advisors with a name and status (`running`, `paused`, `quota_exhausted`, `error`, or `no_model`).
 
 #### `compact`
 
@@ -344,6 +348,10 @@ Args: `provider` and `id`, strings of 1 to 128 UTF-16 units. The pair MUST be in
 `invalid_args` and nothing changes. Calls `pi.setModel`; omp returns false when it has no usable API key for that
 model, which is `failed`. Result `{"model": {"provider", "id"}}`, read back from the session. If omp reports success but
 the session's model is not the requested one, the reply is `failed` ("omp kept the previous model").
+
+#### `set-advisor`
+
+Args: optional boolean `enabled` and optional `provider` and `id` strings, which must be supplied together and match `session-info.models`. At least one is required. The enabled change is applied first. Result: `{"advisor": <the session-info advisor object>}`. Model changes require the advisor to be on; a WATCHDOG model pin can prevent the requested model from starting. These changes last until omp restarts and are not saved to config.
 
 #### `set-thinking`
 

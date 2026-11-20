@@ -42,7 +42,7 @@ describe("operations", () => {
 				protocol: 1,
 				protocols: [1],
 				ops: ["snapshot", "abort", "rename", "send-message", "send-status", "ask-review", "ask-answer"],
-				plugin: { name: "omp-session-control", version: "0.4.1" },
+				plugin: { name: "omp-session-control", version: "0.5.0" },
 			},
 		});
 	});

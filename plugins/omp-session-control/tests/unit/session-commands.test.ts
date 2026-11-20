@@ -14,8 +14,9 @@ let sessionId: string;
 let generation: number;
 let seq = 0;
 
-async function boot(opts: HostOptions = {}) {
+async function boot(opts: HostOptions = {}, advisor?: FakeHost["ctx"]["advisor"]) {
 	host = await FakeHost.start({ enable: true, session: true, env: { OMP_SESSION_CONTROL_IDLE_MS: "5000" }, ...opts });
+	if (advisor) host.ctx.advisor = advisor;
 	await host.fire("session_start");
 	({ client: c, nonce, sessionId, generation } = await Client.toHost(host));
 }
@@ -55,7 +56,7 @@ describe("capability detection", () => {
 	test("a host with none of the APIs offers only the base operations, and the commands are unsupported", async () => {
 		await boot({ session: false });
 		expect(host.registry()?.data.ops).toEqual(BASE_OPS);
-		for (const op of ["session-info", "compact", "set-model", "set-thinking", "set-mode"]) {
+		for (const op of ["session-info", "compact", "set-model", "set-thinking", "set-mode", "set-advisor"]) {
 			expect((await call(op, {})).code).toBe("unsupported");
 		}
 	});
@@ -106,6 +107,7 @@ describe("capability detection", () => {
 			goal: null,
 			interruptMode: null,
 			planNotes: null,
+			advisor: null,
 		});
 	});
 });
@@ -171,6 +173,7 @@ describe("session-info", () => {
 			goal: null,
 			interruptMode: null,
 			planNotes: null,
+			advisor: null,
 		});
 	});
 
@@ -618,6 +621,63 @@ describe("a session replacement cannot land while one of our changes is unsettle
 		expect(await host.cancelled("session_before_switch", { reason: "new" })).toBe(false);
 	});
 });
+describe("set-advisor", () => {
+	test("advertises support, reports state, and switches on or selects a model", async () => {
+		const state = { enabled: false, active: false, model: null as FakeModel | null, advisors: [{ name: "default", status: "paused" }] };
+		const enabled: boolean[] = [];
+		await boot({}, {
+			getState: () => state,
+			setEnabled: value => { enabled.push(value); state.enabled = value; state.active = value; },
+			setModel: model => { state.model = model as FakeModel; },
+		});
+		expect(host.registry()?.data.ops).toEqual([...ALL_OPS, "set-advisor"]);
+		expect((await info()).advisor).toEqual(state);
+		expect(await call("set-advisor", { enabled: true })).toMatchObject({ ok: true, result: { advisor: { enabled: true, active: true } } });
+		expect(enabled).toEqual([true]);
+		expect(await call("set-advisor", { provider: "openai", id: "gpt-6.1-sol" })).toMatchObject({ ok: true, result: { advisor: { model: { provider: "openai", id: "gpt-6.1-sol" } } } });
+		for (const args of [{}, { enabled: "yes" }, { provider: "openai" }, { id: "x" }, { provider: "openai", id: "nope" }]) {
+			expect((await call("set-advisor", args)).code).toBe("invalid_args");
+		}
+	});
+
+	test("maps known model errors and hides unknown errors", async () => {
+		let message = "the advisor did not start on that model; WATCHDOG.yml may pin its model";
+		await boot({}, { getState: () => ({ enabled: true, active: true, model: null, advisors: [] }), setEnabled: () => {}, setModel: () => { throw new Error(message); } });
+		const args = { provider: "openai", id: "gpt-6.1-sol" };
+		expect(await call("set-advisor", args)).toMatchObject({ code: "failed", message });
+		message = "turn the advisor on first, then pick its model";
+		expect(await call("set-advisor", args)).toMatchObject({ code: "invalid_args", message });
+		message = "secret";
+		expect(await call("set-advisor", args)).toMatchObject({ code: "failed", message: "omp could not run set-advisor" });
+	});
+
+	test("isolates failing reads and maps unknown status", async () => {
+		let fails = true;
+		await boot({}, { getState: () => { if (fails) throw new Error("bad"); return { enabled: false, active: false, model: null, advisors: [{ name: "default", status: "weird" }] }; }, setEnabled: () => {}, setModel: () => {} });
+		expect((await info()).advisor).toBeNull();
+		fails = false;
+		expect((await info()).advisor.advisors).toEqual([{ name: "default", status: "error" }]);
+	});
+
+	test("malformed advisor state does not break session-info", async () => {
+		await boot({}, { getState: () => ({ enabled: 1n, active: {}, advisors: [] }), setEnabled: () => {}, setModel: () => {} });
+		const result = await call("session-info");
+		expect(result).toMatchObject({ ok: true, result: { advisor: null, model: { provider: MODEL_A.provider, id: MODEL_A.id }, compacting: false } });
+	});
+
+	test("validates the model before changing advisor state", async () => {
+		const calls: string[] = [];
+		await boot({}, { getState: () => ({ enabled: false, active: false, model: null, advisors: [] }), setEnabled: () => { calls.push("enabled"); }, setModel: () => { calls.push("model"); } });
+		expect((await call("set-advisor", { enabled: true, provider: "openai", id: "unavailable" })).code).toBe("invalid_args");
+		expect(calls).toEqual([]);
+	});
+
+	test("without advisor support the operation is refused", async () => {
+		await boot();
+		expect((await call("set-advisor", { enabled: true })).code).toBe("unsupported");
+	});
+});
+
 
 describe("set-model", () => {
 	test("switches to a model in the available list", async () => {
