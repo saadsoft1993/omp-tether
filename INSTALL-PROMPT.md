@@ -12,7 +12,7 @@ Step 1. Ask me first, in one form, with these defaults:
 - Advisor (a second model reviews each turn; costs extra model calls): yes (default) / no.
 - Saad's look (status line, titles, display): no (default) / yes.
 - Plugins: omp-session-control, omp-services, omp-private-relay, omp-dashboard, omp-memory (all checked by default).
-- Redesigned stats dashboard (clones omp-insights, needs Bun 1.4.4+, tested on macOS arm64): yes (default) / no.
+- Redesigned stats dashboard (clones omp-insights, needs Bun 1.4.4+, tested on Linux x64 and macOS arm64): yes (default) / no.
 - Optional third parties, all off by default, one line each: Tailscale (reach the dashboard and relay from my other devices), ntfy push alerts (ntfy.sh or my own server), heartbeat monitor URL (e.g. healthchecks.io), herdr or tmux (start sessions from the dashboard), self-hosted Hindsight memory server with omp-hindsight-guard.
 Do nothing until I answer. Never configure anything that sends data off this machine unless I chose it and gave you the value.
 
@@ -30,3 +30,7 @@ Step 7. Hindsight, if chosen: follow docs/server-setup.md in omp-hindsight-guard
 
 Step 8. Finish with one table: component | version | enabled | check result | URL or command to use it. Then list what I skipped and how to add it later.
 ```
+
+## Enigmatix team
+
+If you work at Enigmatix and have access to the private github.com/saadsoft1993/omp-fleet, follow its TEAM-SETUP.md instead of this prompt. It sets up the same plugins plus Saad's hub dashboard (the control center on port 8794), his agents, rules and skills, and a template of his settings. Secrets stay in your own AWS account; the repos only hold their names.
